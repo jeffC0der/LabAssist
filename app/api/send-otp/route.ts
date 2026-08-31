@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { BrevoClient } from '@getbrevo/brevo';
 import { generateNumericOtp, saveOtp } from '@/lib/otpStore';
+import { decrypt } from '@/lib/aes';
 
 // Types for Request & Response
 interface SendOtpRequestBody {
@@ -262,12 +263,16 @@ export async function POST(request: Request): Promise<NextResponse<SendOtpRespon
     // 4. Save to OTP store with 10-minute validity
     saveOtp(cleanEmail, finalOtp, 10, purpose, { name });
 
-    // 5. Check for Brevo API Key
-    const apiKey = process.env.BREVO_API_KEY;
-    if (!apiKey || !apiKey.trim()) {
-      console.error('[send-otp] Server Error: BREVO_API_KEY environment variable is not configured.');
+    // 5. Decrypt Brevo API Key (AES-256-GCM encrypted at rest)
+    let apiKey: string;
+    try {
+      const encKey = process.env.BREVO_API_KEY_ENC;
+      if (!encKey) throw new Error('BREVO_API_KEY_ENC is not set');
+      apiKey = decrypt(encKey);
+    } catch (err: any) {
+      console.error('[send-otp] Failed to decrypt Brevo API key:', err?.message);
       return NextResponse.json(
-        { success: false, error: 'Brevo API key is not configured on the server.' },
+        { success: false, error: 'Brevo API key could not be decrypted. Check server configuration.' },
         { status: 500 }
       );
     }

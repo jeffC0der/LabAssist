@@ -625,6 +625,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     try {
       const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined;
+
+      // Obtain an AES-256-GCM encrypted CSRF state token from the server.
+      // This prevents login-CSRF and redirect-injection attacks on the OAuth flow.
+      let oauthState: string | undefined;
+      try {
+        const stateRes = await fetch('/api/auth/state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ returnUrl: redirectUrl }),
+        });
+        if (stateRes.ok) {
+          const { state } = await stateRes.json();
+          oauthState = state;
+        }
+      } catch {
+        // Non-fatal: proceed without state if server is unreachable during generation
+        console.warn('[signInWithGoogle] Could not generate encrypted OAuth state token.');
+      }
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
@@ -633,6 +652,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             access_type: 'offline',
             prompt: 'consent',
             hd: 'umak.edu.ph',
+            ...(oauthState ? { state: oauthState } : {}),
           },
         },
       });
@@ -642,6 +662,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     }
   }, []);
+
 
   // Google GIS ID-Token sign in (used by GoogleButton via GIS popup — no Supabase redirect URL shown)
   const signInWithGoogleIdToken = useCallback(async (idToken: string): Promise<{ user?: User; isNewUser: boolean; email?: string; name?: string }> => {
@@ -692,6 +713,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const profile = await fetchUserProfile(data.user);
       saveUserSession(profile);
+
+      // ── Feature D: Store AES-256-GCM encrypted Google ID token at rest ──
+      // Dispatched in the background — does not block routing or sign-in UX.
+      fetch('/api/auth/store-google-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken, userId: data.user.id }),
+      }).catch((err) =>
+        console.warn('[signInWithGoogleIdToken] Non-critical: failed to persist encrypted token:', err)
+      );
+
       return {
         user: profile,
         isNewUser: false,

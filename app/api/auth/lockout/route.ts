@@ -9,6 +9,7 @@ import {
   LOCKOUT_DURATION_MS,
 } from '@/lib/lockoutStore';
 import { generateAccountLockedEmailHtml } from '@/lib/emailTemplates';
+import { decrypt } from '@/lib/aes';
 
 interface LockoutRequestBody {
   email?: string;
@@ -25,10 +26,14 @@ async function dispatchBrevoLockoutEmail(
   recipientName?: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   try {
-    const apiKey = process.env.BREVO_API_KEY;
-    if (!apiKey || !apiKey.trim()) {
-      console.warn('[lockout] BREVO_API_KEY environment variable is not configured.');
-      return { success: false, error: 'Brevo API key not configured' };
+    let apiKey: string;
+    try {
+      const encKey = process.env.BREVO_API_KEY_ENC;
+      if (!encKey) throw new Error('BREVO_API_KEY_ENC is not set');
+      apiKey = decrypt(encKey);
+    } catch (err: any) {
+      console.warn('[lockout] Failed to decrypt Brevo API key:', err?.message);
+      return { success: false, error: 'Brevo API key could not be decrypted' };
     }
 
     const brevo = new BrevoClient({

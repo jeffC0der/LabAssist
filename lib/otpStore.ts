@@ -91,8 +91,11 @@ export function verifyAndConsumeOtp(
     };
   }
 
-  // Check code match
-  if (entry.code !== cleanCode) {
+  // Check code match — use constant-time comparison to prevent timing attacks
+  const codeMatch =
+    entry.code.length === cleanCode.length &&
+    crypto.timingSafeEqual(Buffer.from(entry.code, 'utf8'), Buffer.from(cleanCode, 'utf8'));
+  if (!codeMatch) {
     const remaining = 5 - entry.attempts;
     return {
       valid: false,

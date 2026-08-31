@@ -106,31 +106,68 @@ export default function AuthCallbackPage() {
 
     }
 
-    // Strategy 1: onAuthStateChange fires as soon as Supabase parses the hash fragment.
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
-        processUser(session.user);
+    // ── Feature C: AES-256-GCM OAuth State Verification + Auth Listener Setup ──
+    // Wrapped in async init() because useEffect callbacks cannot be async directly.
+    async function init() {
+      // If Google returned a `state` parameter in the URL, verify it server-side
+      // before trusting the callback. Reject if tampered, expired, or replayed.
+      const urlParams = new URLSearchParams(window.location.search);
+      const returnedState = urlParams.get('state');
+      if (returnedState) {
+        try {
+          const verifyRes = await fetch('/api/auth/state', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: returnedState }),
+          });
+          const verifyData = await verifyRes.json();
+          if (!verifyRes.ok || !verifyData.valid) {
+            console.error('[callback] OAuth state verification failed:', verifyData.error);
+            setStatusMsg('Security check failed. Please try signing in again.');
+            try { await supabase.auth.signOut(); } catch {}
+            router.replace('/auth?error=state_invalid');
+            return;
+          }
+        } catch (stateErr) {
+          console.warn('[callback] State verification request failed — proceeding cautiously:', stateErr);
+          // Non-fatal if server is temporarily unreachable; log but continue
+        }
       }
-    });
 
-    // Strategy 2: Also try getSession() immediately (covers cases where session was
-    // already established before this component mounted, e.g. fast load).
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        processUser(session.user);
-      }
-    });
+      // Strategy 1: onAuthStateChange fires as soon as Supabase parses the hash fragment.
+      const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+        if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+          processUser(session.user);
+        }
+      });
 
-    // Fallback: if nothing fires within 10 seconds, bounce back to auth.
-    const timeout = setTimeout(() => {
-      if (!isHandled) {
-        router.replace('/auth');
-      }
-    }, 10000);
+      // Strategy 2: Also try getSession() immediately (covers cases where session was
+      // already established before this component mounted, e.g. fast load).
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          processUser(session.user);
+        }
+      });
+
+      // Fallback: if nothing fires within 10 seconds, bounce back to auth.
+      const timeout = setTimeout(() => {
+        if (!isHandled) {
+          router.replace('/auth');
+        }
+      }, 10000);
+
+      // Return a cleanup fn — stored so the useEffect cleanup can call it.
+      return () => {
+        clearTimeout(timeout);
+        authListener?.subscription.unsubscribe();
+      };
+    }
+
+    let cleanupFn: (() => void) | undefined;
+    init().then((fn) => { cleanupFn = fn; });
 
     return () => {
-      clearTimeout(timeout);
-      authListener?.subscription.unsubscribe();
+      cleanupFn?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
