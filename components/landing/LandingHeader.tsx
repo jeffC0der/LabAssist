@@ -1,7 +1,8 @@
 'use client';
 import React from 'react';
 import Link from 'next/link';
-import { Cpu, Wifi, LogIn } from 'lucide-react';
+import Image from 'next/image';
+import { Wifi, LogIn } from 'lucide-react';
 
 export default function LandingHeader() {
   return (
@@ -9,11 +10,18 @@ export default function LandingHeader() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2.5 group" aria-label="LabAssist Home">
-          <div className="relative w-9 h-9 flex items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 shadow-glow-indigo group-hover:shadow-glow-cyan transition-all duration-300">
-            <Cpu size={18} className="text-white" />
+          <div className="relative w-9 h-9 flex items-center justify-center">
+            <Image
+              src="/UMakLabAssistLogo.png"
+              alt="UMak LabAssist Logo"
+              width={36}
+              height={36}
+              className="w-9 h-9 object-contain rounded-full drop-shadow-md group-hover:scale-105 transition-transform duration-300"
+              priority
+            />
             <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-slate-900" />
           </div>
-          <div>
+          <div className="flex items-center">
             <span className="text-base font-bold text-slate-100 tracking-tight">Lab</span>
             <span className="text-base font-bold gradient-text tracking-tight">Assist</span>
           </div>

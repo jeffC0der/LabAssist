@@ -40,7 +40,8 @@ interface AuthContextValue {
   updateNewPassword: (newPassword: string, email?: string) => Promise<void>;
   checkLockoutStatus: (email: string) => Promise<LockoutInfo>;
   signInWithGoogle: () => Promise<void>;
-  signInWithGoogleIdToken: (idToken: string) => Promise<User>;
+  signInWithGoogleIdToken: (idToken: string) => Promise<{ user?: User; isNewUser: boolean; email?: string; name?: string }>;
+  completeGoogleSignupWithPassword: (password: string) => Promise<User>;
   adminLogin: (username: string, password: string) => Promise<boolean>;
   promoteUser: (emailOrId: string, newRole: UserRole) => Promise<void>;
   demoteUser: (emailOrId: string) => Promise<void>;
@@ -436,6 +437,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Access restricted: Only @umak.edu.ph email addresses are authorized to register.');
       }
 
+      // Check if user already exists in profiles
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', trimmedEmail)
+        .maybeSingle();
+
+      if (existingProfile) {
+        throw new Error('An account with this email address already exists.');
+      }
+
       // Dispatch Brevo OTP via API
       const res = await fetch('/api/send-otp', {
         method: 'POST',
@@ -632,7 +644,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Google GIS ID-Token sign in (used by GoogleButton via GIS popup — no Supabase redirect URL shown)
-  const signInWithGoogleIdToken = useCallback(async (idToken: string): Promise<User> => {
+  const signInWithGoogleIdToken = useCallback(async (idToken: string): Promise<{ user?: User; isNewUser: boolean; email?: string; name?: string }> => {
     setIsLoading(true);
     try {
       const { data, error } = await supabase.auth.signInWithIdToken({
@@ -650,7 +662,77 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Access restricted: Only Google accounts with the @umak.edu.ph domain are authorized.');
       }
 
+      // Lockout bypass check
+      const lockStatus = await checkLockoutStatus(email);
+      if (lockStatus.isLocked) {
+        await supabase.auth.signOut();
+        const err: any = new Error('Account temporarily locked. Your account will automatically unlock when the timer expires.');
+        err.isLocked = true;
+        err.lockedUntil = lockStatus.lockedUntil;
+        err.remainingSeconds = lockStatus.remainingSeconds;
+        throw err;
+      }
+
+      // Check if profile exists
+      const [{ data: profileRow }, { data: userRow }] = await Promise.all([
+        supabase.from('profiles').select('id').eq('id', data.user.id).maybeSingle(),
+        supabase.from('users').select('id').eq('id', data.user.id).maybeSingle(),
+      ]);
+
+      const isNewUser = !profileRow && !userRow;
+      const fullName = data.user.user_metadata?.full_name || data.user.user_metadata?.name || email.split('@')[0];
+
+      if (isNewUser) {
+        return {
+          isNewUser: true,
+          email,
+          name: fullName,
+        };
+      }
+
       const profile = await fetchUserProfile(data.user);
+      saveUserSession(profile);
+      return {
+        user: profile,
+        isNewUser: false,
+      };
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fetchUserProfile, saveUserSession, checkLockoutStatus]);
+
+  // Complete first-time Google signup by asking user for a custom password
+  const completeGoogleSignupWithPassword = useCallback(async (password: string): Promise<User> => {
+    setIsLoading(true);
+    try {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) throw new Error('No active Google session found.');
+
+      // Update manual sign-in password
+      const { error: pwdError } = await supabase.auth.updateUser({ password });
+      if (pwdError) throw pwdError;
+
+      const email = (currentUser.email || '').toLowerCase().trim();
+      const fullName = currentUser.user_metadata?.full_name || currentUser.user_metadata?.name || email.split('@')[0];
+
+      // Upsert user profile records
+      await Promise.all([
+        supabase.from('profiles').upsert({
+          id: currentUser.id,
+          email,
+          name: fullName,
+          role: 'STUDENT',
+          department: 'Undergraduate Engineering',
+        }),
+        supabase.from('users').upsert({
+          id: currentUser.id,
+          email,
+          full_name: fullName,
+          role: 'STUDENT',
+        }),
+      ]);
+
+      const profile = await fetchUserProfile(currentUser);
       saveUserSession(profile);
       return profile;
     } finally {
@@ -788,6 +870,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         checkLockoutStatus,
         signInWithGoogle,
         signInWithGoogleIdToken,
+        completeGoogleSignupWithPassword,
         adminLogin,
         promoteUser,
         demoteUser,

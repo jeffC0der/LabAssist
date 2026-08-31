@@ -2,8 +2,9 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import {
-  ShieldCheck, ArrowLeft, RefreshCw, Check, AlertCircle, Mail, Cpu,
+  ShieldCheck, ArrowLeft, RefreshCw, Check, AlertCircle, Mail,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
@@ -133,12 +134,18 @@ function VerifyOtpContent() {
     <main className="min-h-screen bg-base flex flex-col justify-between" id="verify-otp-main">
       {/* Top Navbar */}
       <div className="relative z-10 flex items-center justify-between px-6 py-4 nav-blur border-b border-slate-800/80">
-        <Link href="/" className="flex items-center gap-2.5" aria-label="Back to LabAssist Home">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center shadow-glow-indigo">
-            <Cpu size={16} className="text-white" />
+        <Link href="/" className="flex items-center gap-2.5 group" aria-label="Back to LabAssist Home">
+          <Image
+            src="/UMakLabAssistLogo.png"
+            alt="UMak LabAssist Logo"
+            width={32}
+            height={32}
+            className="w-8 h-8 object-contain rounded-full drop-shadow-md group-hover:scale-105 transition-transform duration-300"
+          />
+          <div className="flex items-center">
+            <span className="text-sm font-bold text-slate-100 tracking-tight">Lab</span>
+            <span className="text-sm font-bold gradient-text tracking-tight">Assist</span>
           </div>
-          <span className="text-sm font-bold text-slate-100">Lab</span>
-          <span className="text-sm font-bold gradient-text -ml-1.5">Assist</span>
         </Link>
 
         <Link

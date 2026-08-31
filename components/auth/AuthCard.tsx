@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useCallback, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Image from 'next/image';
 import {
   Eye, EyeOff, User, Mail, Lock, AlertCircle, KeyRound, CheckCircle2,
   ArrowLeft, ArrowRight, ShieldCheck, ShieldAlert, Clock, RefreshCw, Sparkles, Check, GraduationCap,
@@ -19,7 +20,8 @@ export type AuthView =
   | 'verify_signup_otp'
   | 'forgot_email'
   | 'forgot_otp'
-  | 'forgot_new_password';
+  | 'forgot_new_password'
+  | 'set_google_password';
 
 interface InputWrapperProps {
   children: React.ReactNode;
@@ -53,6 +55,7 @@ export default function AuthCard() {
     verifyPasswordResetOtp,
     updateNewPassword,
     checkLockoutStatus,
+    completeGoogleSignupWithPassword,
     isLoading,
   } = useAuth();
   const toast = useToast();
@@ -80,6 +83,14 @@ export default function AuthCard() {
   const [otpToken, setOtpToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
+
+  // Google first-time sign-in state
+  const [googleEmail, setGoogleEmail] = useState('');
+  const [googleName, setGoogleName] = useState('');
+  const [googlePassword, setGooglePassword] = useState('');
+  const [googleConfirmPassword, setGoogleConfirmPassword] = useState('');
+  const [showGooglePassword, setShowGooglePassword] = useState(false);
+  const [showGoogleConfirm, setShowGoogleConfirm] = useState(false);
 
   // Lockout Security State (6 Failed Attempts -> 15 Minute Lock)
   const [isLocked, setIsLocked] = useState(false);
@@ -376,14 +387,63 @@ export default function AuthCard() {
     }
   };
 
+  // ── 9. Handle new Google user → show password setup view ─────────────────
+  const handleNewGoogleUser = useCallback((email: string, name: string) => {
+    setGoogleEmail(email);
+    setGoogleName(name);
+    setGooglePassword('');
+    setGoogleConfirmPassword('');
+    resetErrors();
+    setView('set_google_password');
+  }, []);
+
+  // ── 10. Complete Google signup with chosen password ────────────────────────
+  const handleGooglePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (googlePassword.length < 8) {
+      setAuthError('Password must be at least 8 characters.');
+      return;
+    }
+    if (googlePassword !== googleConfirmPassword) {
+      setAuthError('Passwords do not match.');
+      return;
+    }
+    resetErrors();
+    try {
+      const profile = await completeGoogleSignupWithPassword(googlePassword);
+      toast.success('Account Ready!', `Welcome to LabAssist, ${profile.name || googleEmail}!`);
+      if (profile.role === 'ADMIN') {
+        router.push('/admin');
+      } else if (profile.role === 'TECHNICIAN') {
+        router.push('/technician');
+      } else {
+        router.push('/student');
+      }
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to set password. Please try again.';
+      setAuthError(msg);
+      toast.error('Password setup failed', msg);
+    }
+  };
+
 
   return (
     <div className="glass rounded-2xl p-8 w-full max-w-md mx-auto shadow-2xl animate-fade-in-up">
       {/* Logo */}
       <div className="text-center mb-6">
-        <div className="inline-flex items-center gap-2 mb-2">
-          <span className="text-xl font-black text-slate-100">Lab</span>
-          <span className="text-xl font-black gradient-text">Assist</span>
+        <div className="flex justify-center mb-3">
+          <Image
+            src="/UMakLabAssistLogo.png"
+            alt="UMak LabAssist Logo"
+            width={64}
+            height={64}
+            className="w-16 h-16 object-contain rounded-full drop-shadow-[0_0_15px_rgba(99,102,241,0.35)]"
+            priority
+          />
+        </div>
+        <div className="inline-flex items-center justify-center mb-1">
+          <span className="text-xl font-black text-slate-100 tracking-tight">Lab</span>
+          <span className="text-xl font-black gradient-text tracking-tight">Assist</span>
         </div>
         <p className="text-xs text-slate-400 font-medium">University of Makati Lab Maintenance</p>
         <div className="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-[11px] text-indigo-300 font-medium">
@@ -446,7 +506,7 @@ export default function AuthCard() {
       {/* ────────────────────────────────────────────────────────────────────────── */}
       {view === 'signin' && (
         <div className="space-y-4">
-                        <GoogleButton />
+                        <GoogleButton onNewGoogleUser={handleNewGoogleUser} />
 
           <div className="flex items-center gap-3 my-5" role="separator" aria-label="Or continue with email">
             <div className="flex-1 h-px bg-slate-700" />
@@ -581,7 +641,7 @@ export default function AuthCard() {
       {/* ────────────────────────────────────────────────────────────────────────── */}
       {view === 'signup' && (
         <div className="space-y-4">
-                        <GoogleButton />
+                        <GoogleButton onNewGoogleUser={handleNewGoogleUser} />
 
           <div className="flex items-center gap-3 my-5" role="separator" aria-label="Or continue with email">
             <div className="flex-1 h-px bg-slate-700" />
@@ -1044,6 +1104,107 @@ export default function AuthCard() {
                 <>
                   <Check size={16} />
                   <span>Update Password &amp; Sign In</span>
+                </>
+              )}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* VIEW: SET GOOGLE PASSWORD (first-time Google sign-in)                     */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {view === 'set_google_password' && (
+        <div className="space-y-5 animate-fade-in">
+          <div className="text-center space-y-1">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 mx-auto mb-3">
+              <svg width="22" height="22" viewBox="0 0 48 48" aria-hidden="true">
+                <path fill="#4285F4" d="M44.5 20H24v8.5h11.8C34.1 33.9 29.6 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 5.1 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.6 20-21 0-1.3-.2-2.7-.5-4z" />
+              </svg>
+            </div>
+            <h2 className="text-base font-bold text-slate-100">Set Your Password</h2>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Welcome, <span className="text-indigo-300 font-semibold">{googleName || googleEmail}</span>! Create a password so you can also sign in manually with your UMak email.
+            </p>
+          </div>
+
+          <form onSubmit={handleGooglePasswordSubmit} className="space-y-4" noValidate>
+            {/* Password */}
+            <div>
+              <label htmlFor="goog-password" className="block text-xs font-semibold text-slate-400 mb-1.5">
+                Create Password
+              </label>
+              <div className="relative">
+                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" aria-hidden="true" />
+                <input
+                  id="goog-password"
+                  type={showGooglePassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={googlePassword}
+                  onChange={e => setGooglePassword(e.target.value)}
+                  className="input-field w-full pl-9 pr-10 py-2.5"
+                  placeholder="Min. 8 characters"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowGooglePassword(p => !p)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  aria-label={showGooglePassword ? 'Hide password' : 'Show password'}
+                >
+                  {showGooglePassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+              {googlePassword.length > 0 && googlePassword.length < 8 && (
+                <p className="text-xs text-red-400 mt-1">Password must be at least 8 characters.</p>
+              )}
+            </div>
+
+            {/* Confirm Password */}
+            <div>
+              <label htmlFor="goog-confirm-password" className="block text-xs font-semibold text-slate-400 mb-1.5">
+                Confirm Password
+              </label>
+              <div className="relative">
+                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" aria-hidden="true" />
+                <input
+                  id="goog-confirm-password"
+                  type={showGoogleConfirm ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={googleConfirmPassword}
+                  onChange={e => setGoogleConfirmPassword(e.target.value)}
+                  className="input-field w-full pl-9 pr-10 py-2.5"
+                  placeholder="Re-enter password"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowGoogleConfirm(p => !p)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  aria-label={showGoogleConfirm ? 'Hide password' : 'Show password'}
+                >
+                  {showGoogleConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+              {googleConfirmPassword.length > 0 && googlePassword !== googleConfirmPassword && (
+                <p className="text-xs text-red-400 mt-1">Passwords do not match.</p>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading || googlePassword.length < 8 || googlePassword !== googleConfirmPassword}
+              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(99,102,241,0.3)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? (
+                <>
+                  <LoadingSpinner size={16} className="text-white" />
+                  <span>Setting Up Account…</span>
+                </>
+              ) : (
+                <>
+                  <Check size={16} />
+                  <span>Complete Registration</span>
                 </>
               )}
             </button>

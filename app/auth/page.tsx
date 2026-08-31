@@ -1,7 +1,7 @@
 import React, { Suspense } from 'react';
 import type { Metadata } from 'next';
 import AuthCard from '@/components/auth/AuthCard';
-import { Cpu } from 'lucide-react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 
@@ -26,12 +26,18 @@ export default function AuthPage() {
 
       {/* Top nav bar */}
       <div className="relative z-10 flex items-center justify-between px-6 py-4 nav-blur">
-        <Link href="/" className="flex items-center gap-2.5" aria-label="Back to LabAssist Home">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center shadow-glow-indigo">
-            <Cpu size={16} className="text-white" />
+        <Link href="/" className="flex items-center gap-2.5 group" aria-label="Back to LabAssist Home">
+          <Image
+            src="/UMakLabAssistLogo.png"
+            alt="UMak LabAssist Logo"
+            width={32}
+            height={32}
+            className="w-8 h-8 object-contain rounded-full drop-shadow-md group-hover:scale-105 transition-transform duration-300"
+          />
+          <div className="flex items-center">
+            <span className="text-sm font-bold text-slate-100 tracking-tight">Lab</span>
+            <span className="text-sm font-bold gradient-text tracking-tight">Assist</span>
           </div>
-          <span className="text-sm font-bold text-slate-100">Lab</span>
-          <span className="text-sm font-bold gradient-text -ml-1.5">Assist</span>
         </Link>
         <Link href="/" className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
           ← Back to home

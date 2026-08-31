@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Image from 'next/image';
 import Link from 'next/link';
 import LandingHeader from '@/components/landing/LandingHeader';
 import HeroSection from '@/components/landing/HeroSection';
@@ -24,8 +25,17 @@ export default function LandingPage() {
       <footer className="border-t border-slate-800 py-8 px-4" role="contentinfo">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-600">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-500">Lab</span>
-            <span className="font-bold text-indigo-500">Assist</span>
+            <Image
+              src="/UMakLabAssistLogo.png"
+              alt="UMak LabAssist Logo"
+              width={20}
+              height={20}
+              className="w-5 h-5 object-contain rounded-full opacity-80"
+            />
+            <div className="flex items-center">
+              <span className="font-bold text-slate-500">Lab</span>
+              <span className="font-bold text-indigo-500">Assist</span>
+            </div>
             <span>— IoT Lab Maintenance Platform</span>
           </div>
           <div className="flex items-center gap-4">

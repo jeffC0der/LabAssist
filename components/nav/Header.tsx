@@ -1,8 +1,9 @@
 'use client';
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { Cpu, Wifi, User, LogOut, Shield, Wrench, GraduationCap, ChevronDown, Bell } from 'lucide-react';
+import { Wifi, User, LogOut, Shield, Wrench, GraduationCap, ChevronDown, Bell } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 
@@ -64,12 +65,16 @@ export default function Header() {
         {/* Left: Brand Logo & WS Status */}
         <div className="flex items-center gap-3 sm:gap-4 flex-shrink-0">
           <Link href="/" className="flex items-center gap-2.5 group" aria-label="LabAssist Home">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center shadow-glow-indigo group-hover:shadow-glow-cyan transition-all duration-300">
-              <Cpu size={16} className="text-white" />
-            </div>
-            <div>
-              <span className="text-sm font-bold text-slate-100">Lab</span>
-              <span className="text-sm font-bold gradient-text">Assist</span>
+            <Image
+              src="/UMakLabAssistLogo.png"
+              alt="UMak LabAssist Logo"
+              width={32}
+              height={32}
+              className="w-8 h-8 object-contain rounded-full drop-shadow-md group-hover:scale-105 transition-transform duration-300"
+            />
+            <div className="flex items-center">
+              <span className="text-sm font-bold text-slate-100 tracking-tight">Lab</span>
+              <span className="text-sm font-bold gradient-text tracking-tight">Assist</span>
             </div>
           </Link>
 

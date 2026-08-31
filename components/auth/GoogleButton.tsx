@@ -39,6 +39,10 @@ declare global {
   }
 }
 
+interface GoogleButtonProps {
+  onNewGoogleUser?: (email: string, name: string) => void;
+}
+
 /**
  * GoogleButton mounts Google Identity Services (GIS) button directly.
  * Clicking the button opens Google's native popup window anchored to YOUR domain
@@ -46,7 +50,7 @@ declare global {
  *
  * The resulting ID Token is passed to Supabase via signInWithIdToken.
  */
-export default function GoogleButton() {
+export default function GoogleButton({ onNewGoogleUser }: GoogleButtonProps) {
   const { signInWithGoogleIdToken, isLoading: authLoading } = useAuth();
   const toast = useToast();
   const router = useRouter();
@@ -61,7 +65,17 @@ export default function GoogleButton() {
       if (!response.credential) return;
       setIsSubmitting(true);
       try {
-        const loggedInUser = await signInWithGoogleIdToken(response.credential);
+        const result = await signInWithGoogleIdToken(response.credential);
+        
+        if (result.isNewUser) {
+          toast.info('Setup Manual Password', 'Please create a password for your account to complete registration.');
+          if (onNewGoogleUser) {
+            onNewGoogleUser(result.email || '', result.name || '');
+          }
+          return;
+        }
+
+        const loggedInUser = result.user!;
         toast.success('Welcome back!', `Signed in as ${loggedInUser.name || loggedInUser.email}`);
         if (loggedInUser.role === 'ADMIN') {
           router.push('/admin');

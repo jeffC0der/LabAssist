@@ -16,6 +16,10 @@ export const metadata: Metadata = {
     description: 'Real-time IT dispatch queue powered by ESP32 IoT hardware integration.',
     type: 'website',
   },
+  icons: {
+    icon: '/UMakLabAssistLogo.png',
+    apple: '/UMakLabAssistLogo.png',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
