@@ -19,9 +19,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Email is required.' }, { status: 400 });
     }
 
-    if (!newPassword || newPassword.length < 6) {
+    if (!newPassword || newPassword.length < 16) {
       return NextResponse.json(
-        { success: false, error: 'New password must be at least 6 characters.' },
+        { success: false, error: 'New password must be at least 16 characters.' },
         { status: 400 }
       );
     }

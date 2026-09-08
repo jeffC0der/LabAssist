@@ -66,7 +66,7 @@ function VerifyOtpContent() {
           email: cleanEmail,
           otpCode: cleanToken,
           name: defaultName,
-          purpose: typeParam === 'signup' ? 'signup' : 'oauth_signup',
+          purpose: typeParam === 'login' ? 'login' : (typeParam === 'signup' ? 'signup' : 'oauth_signup'),
         }),
       });
 
@@ -76,7 +76,7 @@ function VerifyOtpContent() {
       }
 
       await refreshProfile();
-      toast.success('Email Verified!', `Welcome to LabAssist, ${defaultName}!`);
+      toast.success('Verified!', `Welcome back to LabAssist, ${defaultName}!`);
 
       const resolvedRole = data.role || 'STUDENT';
       if (resolvedRole === 'ADMIN') {
@@ -109,7 +109,7 @@ function VerifyOtpContent() {
         body: JSON.stringify({
           email: cleanEmail,
           name: nameParam || cleanEmail.split('@')[0],
-          purpose: typeParam === 'signup' ? 'signup' : 'oauth_signup',
+          purpose: typeParam === 'login' ? 'login' : (typeParam === 'signup' ? 'signup' : 'oauth_signup'),
         }),
       });
 

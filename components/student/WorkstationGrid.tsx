@@ -1,7 +1,8 @@
 'use client';
 import React, { useState } from 'react';
 import { Monitor, CheckCircle2, User, AlertTriangle, Cpu, HardDrive, Wifi, Sparkles, ArrowUpRight } from 'lucide-react';
-import { MOCK_WORKSTATIONS, LAB_ROOMS, type Workstation, type WorkstationStatus } from '@/lib/mockData';
+import { LAB_ROOMS, type Workstation, type WorkstationStatus } from '@/lib/mockData';
+import { useWorkstations } from '@/context/WorkstationContext';
 
 interface WorkstationGridProps {
   onSelectStation?: (lab: string, pcNum: string) => void;
@@ -9,13 +10,14 @@ interface WorkstationGridProps {
 }
 
 export default function WorkstationGrid({ onSelectStation, selectedStation }: WorkstationGridProps) {
-  const [selectedLab, setSelectedLab] = useState<string>('LAB-302');
+  const { workstations } = useWorkstations();
+  const [selectedLab, setSelectedLab] = useState<string>('LAB-101');
   const [statusFilter, setStatusFilter] = useState<WorkstationStatus | 'ALL'>('ALL');
   const [activeModalStation, setActiveModalStation] = useState<Workstation | null>(null);
 
   // Available lab rooms excluding "All Labs"
   const labOptions = LAB_ROOMS.filter(r => r !== 'All Labs');
-  const stations = MOCK_WORKSTATIONS[selectedLab] || [];
+  const stations = workstations[selectedLab] || [];
 
   const filteredStations = stations.filter(s => {
     if (statusFilter === 'ALL') return true;

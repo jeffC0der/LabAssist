@@ -12,6 +12,7 @@ export interface User {
   role: UserRole;
   avatar: string;
   department: string;
+  requireLoginOtp?: boolean;
 }
 
 export interface LockoutInfo {
@@ -40,13 +41,18 @@ interface AuthContextValue {
   updateNewPassword: (newPassword: string, email?: string) => Promise<void>;
   checkLockoutStatus: (email: string) => Promise<LockoutInfo>;
   signInWithGoogle: () => Promise<void>;
-  signInWithGoogleIdToken: (idToken: string) => Promise<{ user?: User; isNewUser: boolean; email?: string; name?: string }>;
+  signInWithGoogleIdToken: (idToken: string) => Promise<{ user?: User; isNewUser: boolean; requireOtp?: boolean; email?: string; name?: string }>;
   completeGoogleSignupWithPassword: (password: string) => Promise<User>;
   adminLogin: (username: string, password: string) => Promise<boolean>;
   promoteUser: (emailOrId: string, newRole: UserRole) => Promise<void>;
   demoteUser: (emailOrId: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  updateProfile: (updates: { name?: string; department?: string; avatar?: string }) => Promise<User>;
+  toggleLoginOtp: (enabled: boolean) => Promise<boolean>;
+  requestLoginOtp: (email: string, name?: string) => Promise<void>;
+  verifyLoginOtp: (email: string, token: string, password?: string) => Promise<User>;
+  checkEmailRequiresOtp: (email: string) => Promise<{ requireOtp: boolean; name?: string }>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -97,17 +103,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       lowerEmail === 'labadmin@gmail.com' ||
       lowerEmail === 'labadmin@campus.edu' ||
       lowerEmail === 'labadmin' ||
-      lowerEmail === 'admin@campus.edu'
+      lowerEmail === 'admin@campus.edu' ||
+      lowerEmail === 'labassist4umak@gmail.com'
     ) {
       return 'ADMIN';
     }
 
-    // 2. Preserve existing verified ADMIN role from DB/session
+    // 2. Explicit technician identification
+    if (lowerEmail === 'umak.labassist@gmail.com') {
+      return 'TECHNICIAN';
+    }
+
+    // 3. Preserve existing verified ADMIN role from DB/session
     if (fallbackRole === 'ADMIN') {
       return 'ADMIN';
     }
 
-    // 3. Check technician allowlist
+    // 4. Check technician allowlist
     try {
       const { data: wl, error } = await supabase
         .from('whitelisted_technicians')
@@ -149,13 +161,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           } catch {}
         }
 
+        const requireLoginOtp = data.require_login_otp ?? metadata.require_login_otp ?? false;
+
         return {
           id: data.id,
           name: data.name || data.full_name || defaultName,
           email: data.email || email,
           role: effectiveRole,
           avatar: data.avatar || getInitials(data.name || defaultName),
-          department: data.department || 'Undergraduate Engineering',
+          department: data.department || metadata.department || 'Undergraduate Engineering',
+          requireLoginOtp: !!requireLoginOtp,
         };
       }
     } catch {
@@ -172,13 +187,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (userData && !userError) {
         const effectiveRole = await resolveRole(email, (userData.role as UserRole) || 'STUDENT');
+        const requireLoginOtp = userData.require_login_otp ?? metadata.require_login_otp ?? false;
         return {
           id: userData.id,
           name: userData.full_name || userData.name || defaultName,
           email: userData.email || email,
           role: effectiveRole,
           avatar: userData.avatar || getInitials(userData.full_name || defaultName),
-          department: userData.department || 'Undergraduate Engineering',
+          department: userData.department || metadata.department || 'Undergraduate Engineering',
+          requireLoginOtp: !!requireLoginOtp,
         };
       }
     } catch {
@@ -194,7 +211,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       name: defaultName,
       role: 'STUDENT' as UserRole,
       avatar: getInitials(defaultName),
-      department: 'Undergraduate Engineering',
+      department: metadata.department || 'Undergraduate Engineering',
+      requireLoginOtp: !!metadata.require_login_otp,
     };
   };
 
@@ -382,7 +400,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Enforce @umak.edu.ph domain validation
-      if (!isUmakEmail(lowerEmail) && lowerEmail !== 'labadmin' && lowerEmail !== 'labadmin@gmail.com') {
+      if (
+        !isUmakEmail(lowerEmail) &&
+        lowerEmail !== 'labadmin' &&
+        lowerEmail !== 'labadmin@gmail.com' &&
+        lowerEmail !== 'labassist4umak@gmail.com' &&
+        lowerEmail !== 'umak.labassist@gmail.com'
+      ) {
         throw new Error('Access restricted: Only @umak.edu.ph email addresses are authorized to sign in.');
       }
 
@@ -665,7 +689,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 
   // Google GIS ID-Token sign in (used by GoogleButton via GIS popup — no Supabase redirect URL shown)
-  const signInWithGoogleIdToken = useCallback(async (idToken: string): Promise<{ user?: User; isNewUser: boolean; email?: string; name?: string }> => {
+  const signInWithGoogleIdToken = useCallback(async (idToken: string): Promise<{ user?: User; isNewUser: boolean; requireOtp?: boolean; email?: string; name?: string }> => {
     setIsLoading(true);
     try {
       const { data, error } = await supabase.auth.signInWithIdToken({
@@ -676,7 +700,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!data.user) throw new Error('Failed to retrieve user information from Google.');
 
       const email = (data.user.email || '').toLowerCase().trim();
-      const isAdmin = email === 'labadmin@gmail.com' || email === 'labadmin@campus.edu';
+      const isAdmin =
+        email === 'labadmin@gmail.com' ||
+        email === 'labadmin@campus.edu' ||
+        email === 'labassist4umak@gmail.com';
 
       if (!isAdmin && !isUmakEmail(email)) {
         await supabase.auth.signOut();
@@ -712,6 +739,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const profile = await fetchUserProfile(data.user);
+
+      // Check if user account has OTP required on login
+      const isOtpRequired = !!profile.requireLoginOtp || !!data.user.user_metadata?.require_login_otp;
+
+      if (isOtpRequired) {
+        // Dispatch Brevo OTP email for login
+        try {
+          await fetch('/api/send-otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, name: fullName, purpose: 'login' }),
+          });
+        } catch (err) {
+          console.warn('[signInWithGoogleIdToken] OTP dispatch warning:', err);
+        }
+
+        return {
+          user: profile,
+          isNewUser: false,
+          requireOtp: true,
+          email,
+          name: fullName,
+        };
+      }
+
       saveUserSession(profile);
 
       // ── Feature D: Store AES-256-GCM encrypted Google ID token at rest ──
@@ -727,6 +779,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return {
         user: profile,
         isNewUser: false,
+        requireOtp: false,
       };
     } finally {
       setIsLoading(false);
@@ -873,6 +926,211 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await promoteUser(emailOrId, 'STUDENT');
   }, [promoteUser]);
 
+  // Update user profile details (Name, Department, Avatar)
+  const updateProfile = useCallback(async (updates: { name?: string; department?: string; avatar?: string }): Promise<User> => {
+    setIsLoading(true);
+    try {
+      if (!user) throw new Error('No active user session found.');
+
+      const newName = updates.name !== undefined ? updates.name.trim() : user.name;
+      const newDept = updates.department !== undefined ? updates.department.trim() : user.department;
+      const newAvatar = updates.avatar !== undefined ? updates.avatar : getInitials(newName);
+
+      // 1. Call server API
+      try {
+        await fetch('/api/user/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            email: user.email,
+            name: newName,
+            department: newDept,
+            avatar: newAvatar,
+          }),
+        });
+      } catch (err) {
+        console.warn('[updateProfile] API call warning:', err);
+      }
+
+      // 2. Direct Supabase update if possible
+      try {
+        await supabase
+          .from('profiles')
+          .update({
+            name: newName,
+            department: newDept,
+            avatar: newAvatar,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id);
+      } catch {}
+
+      try {
+        await supabase.auth.updateUser({
+          data: {
+            name: newName,
+            full_name: newName,
+            department: newDept,
+          },
+        });
+      } catch {}
+
+      const updatedUser: User = {
+        ...user,
+        name: newName,
+        department: newDept,
+        avatar: newAvatar,
+      };
+
+      saveUserSession(updatedUser);
+      return updatedUser;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user]);
+
+  // Toggle require OTP on login
+  const toggleLoginOtp = useCallback(async (enabled: boolean): Promise<boolean> => {
+    if (!user) throw new Error('No active user session found.');
+
+    try {
+      // 1. Update via server API
+      await fetch('/api/user/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          email: user.email,
+          requireLoginOtp: enabled,
+        }),
+      });
+
+      // 2. Update Supabase metadata
+      try {
+        await supabase.auth.updateUser({
+          data: { require_login_otp: enabled },
+        });
+      } catch {}
+
+      // 3. Update active session
+      const updatedUser: User = {
+        ...user,
+        requireLoginOtp: enabled,
+      };
+      saveUserSession(updatedUser);
+
+      return enabled;
+    } catch (err: any) {
+      console.error('[toggleLoginOtp] Error:', err);
+      throw err;
+    }
+  }, [user]);
+
+  // Quick check if email requires OTP on login
+  const checkEmailRequiresOtp = useCallback(async (email: string): Promise<{ requireOtp: boolean; name?: string }> => {
+    try {
+      const res = await fetch('/api/user/otp-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      });
+      const data = await res.json();
+      return {
+        requireOtp: !!data?.requireLoginOtp,
+        name: data?.name,
+      };
+    } catch {
+      return { requireOtp: false };
+    }
+  }, []);
+
+  // Request OTP for login
+  const requestLoginOtp = useCallback(async (email: string, name?: string): Promise<void> => {
+    setIsLoading(true);
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+      const res = await fetch('/api/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          name: name || cleanEmail.split('@')[0],
+          purpose: 'login',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to dispatch login verification code.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Verify OTP for login and finalize session
+  const verifyLoginOtp = useCallback(async (email: string, token: string, password?: string): Promise<User> => {
+    setIsLoading(true);
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+      const res = await fetch('/api/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          otpCode: token.trim(),
+          purpose: 'login',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Invalid or expired verification code.');
+      }
+
+      // If password provided, sign into Supabase to acquire full session
+      if (password) {
+        try {
+          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password,
+          });
+
+          if (authData?.user && !authError) {
+            const profile = await fetchUserProfile(authData.user);
+            saveUserSession(profile);
+            return profile;
+          }
+        } catch {}
+      }
+
+      // Check current session
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (currentUser) {
+        const profile = await fetchUserProfile(currentUser);
+        saveUserSession(profile);
+        return profile;
+      }
+
+      // Fallback
+      const resolvedRole = data.role || (await resolveRole(cleanEmail, 'STUDENT'));
+      const loggedUser: User = {
+        id: 'usr-' + Date.now(),
+        name: cleanEmail.split('@')[0],
+        email: cleanEmail,
+        role: resolvedRole,
+        avatar: getInitials(cleanEmail),
+        department: 'Undergraduate Engineering',
+        requireLoginOtp: true,
+      };
+      saveUserSession(loggedUser);
+      return loggedUser;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fetchUserProfile]);
+
   const signOut = useCallback(async () => {
     try {
       await supabase.auth.signOut();
@@ -908,6 +1166,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         demoteUser,
         signOut,
         refreshProfile,
+        updateProfile,
+        toggleLoginOtp,
+        requestLoginOtp,
+        verifyLoginOtp,
+        checkEmailRequiresOtp,
       }}
     >
       {children}

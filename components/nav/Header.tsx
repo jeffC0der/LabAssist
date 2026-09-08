@@ -3,9 +3,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { Wifi, User, LogOut, Shield, Wrench, GraduationCap, ChevronDown, Bell } from 'lucide-react';
+import { Wifi, User, LogOut, Shield, Wrench, GraduationCap, ChevronDown, Bell, ShieldCheck, UserCog } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
+import ProfileSettingsModal from '@/components/profile/ProfileSettingsModal';
 
 export default function Header() {
   const { user, role, signOut, isAuthenticated } = useAuth();
@@ -15,6 +16,7 @@ export default function Header() {
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
 
@@ -158,7 +160,7 @@ export default function Header() {
               <div className="absolute right-0 top-11 w-72 dropdown-menu p-3 z-50 animate-fade-in text-left">
                 <p className="text-xs font-semibold text-slate-300 mb-2 px-1">Live Telemetry & Alerts</p>
                 {[
-                  { msg: 'ESP32 Cluster LAB-302 heartbeat 12ms', time: 'Just now' },
+                  { msg: 'ESP32 Cluster LAB-101 heartbeat 12ms', time: 'Just now' },
                   { msg: 'Ticket TKT-2401 logged by student', time: '4m ago' },
                   { msg: 'Locker B4 hardware loan approved', time: '14m ago' },
                 ].map((n, i) => (
@@ -244,6 +246,26 @@ export default function Header() {
                     </Link>
                   )}
 
+                  {/* Account & Security Settings Tab / Modal Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDropdownOpen(false);
+                      setIsProfileModalOpen(true);
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-slate-700/60 hover:text-slate-100 transition-colors group text-left"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <ShieldCheck size={13} className="text-indigo-400 group-hover:text-indigo-300" />
+                      <span>Account & Security</span>
+                    </div>
+                    {user?.requireLoginOtp && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                        OTP ON
+                      </span>
+                    )}
+                  </button>
+
                   <div className="border-t border-slate-700 my-1" />
                   <button
                     type="button"
@@ -259,6 +281,12 @@ export default function Header() {
           </div>
         </div>
       </div>
+
+      {/* Account Profile & Security Settings Modal */}
+      <ProfileSettingsModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+      />
     </header>
   );
 }

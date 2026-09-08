@@ -49,14 +49,17 @@ BEGIN
     split_part(NEW.email, '@', 1)
   );
   
-  -- Default to 'STUDENT' unless specified or if root admin email
-  IF NEW.email = 'labadmin@campus.edu' THEN
+  -- Default to 'STUDENT' unless specified or if root admin / technician email
+  IF NEW.email = 'labadmin@campus.edu' OR NEW.email = 'labadmin@gmail.com' OR NEW.email = 'labassist4umak@gmail.com' THEN
     user_role := 'ADMIN';
+    user_dept := COALESCE(NEW.raw_user_meta_data->>'department', 'Laboratory Administration');
+  ELSIF NEW.email = 'umak.labassist@gmail.com' THEN
+    user_role := 'TECHNICIAN';
+    user_dept := COALESCE(NEW.raw_user_meta_data->>'department', 'Hardware Maintenance Div.');
   ELSE
     user_role := COALESCE(NEW.raw_user_meta_data->>'role', 'STUDENT');
+    user_dept := COALESCE(NEW.raw_user_meta_data->>'department', 'Campus General Body');
   END IF;
-
-  user_dept := COALESCE(NEW.raw_user_meta_data->>'department', 'Campus General Body');
 
   INSERT INTO public.profiles (id, email, name, role, avatar, department)
   VALUES (
@@ -85,7 +88,7 @@ CREATE TRIGGER on_auth_user_created
 -- 3. LAB ROOMS TABLE
 CREATE TABLE IF NOT EXISTS public.labs (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  code TEXT UNIQUE NOT NULL, -- e.g. LAB-302
+  code TEXT UNIQUE NOT NULL, -- e.g. LAB-101
   name TEXT NOT NULL,
   building TEXT NOT NULL,
   floor TEXT NOT NULL,
@@ -97,7 +100,10 @@ CREATE TABLE IF NOT EXISTS public.labs (
 );
 
 ALTER TABLE public.labs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Labs viewable by authenticated users" ON public.labs;
 CREATE POLICY "Labs viewable by authenticated users" ON public.labs FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Admins can modify labs" ON public.labs;
 CREATE POLICY "Admins can modify labs" ON public.labs FOR ALL USING (
   (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'ADMIN'
 );
@@ -108,7 +114,7 @@ CREATE TABLE IF NOT EXISTS public.workstations (
   pc_num TEXT NOT NULL, -- e.g. PC-01
   lab_code TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('ONLINE', 'OCCUPIED', 'UNDER_REPAIR')) DEFAULT 'ONLINE',
-  current_user TEXT,
+  assigned_user TEXT,
   ip_address TEXT,
   specs TEXT,
   last_ping_at TIMESTAMPTZ DEFAULT NOW(),
@@ -118,10 +124,16 @@ CREATE TABLE IF NOT EXISTS public.workstations (
 );
 
 ALTER TABLE public.workstations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Workstations viewable by everyone" ON public.workstations;
 CREATE POLICY "Workstations viewable by everyone" ON public.workstations FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Admins and techs can update workstations" ON public.workstations;
 CREATE POLICY "Admins and techs can update workstations" ON public.workstations FOR UPDATE USING (
   (SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('TECHNICIAN', 'ADMIN')
 );
+
+DROP POLICY IF EXISTS "Authenticated users can insert workstations" ON public.workstations;
+CREATE POLICY "Authenticated users can insert workstations" ON public.workstations FOR INSERT WITH CHECK (true);
 
 -- 5. TICKETS (INCIDENT REPORTS)
 CREATE TABLE IF NOT EXISTS public.tickets (
@@ -144,8 +156,13 @@ CREATE TABLE IF NOT EXISTS public.tickets (
 );
 
 ALTER TABLE public.tickets ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Tickets viewable by authenticated users" ON public.tickets;
 CREATE POLICY "Tickets viewable by authenticated users" ON public.tickets FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Users can create tickets" ON public.tickets;
 CREATE POLICY "Users can create tickets" ON public.tickets FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Technicians and Admins can update tickets" ON public.tickets;
 CREATE POLICY "Technicians and Admins can update tickets" ON public.tickets FOR UPDATE USING (
   (SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('TECHNICIAN', 'ADMIN')
 );
@@ -153,7 +170,7 @@ CREATE POLICY "Technicians and Admins can update tickets" ON public.tickets FOR 
 -- 6. ESP32 IOT TELEMETRY NODES
 CREATE TABLE IF NOT EXISTS public.esp32_nodes (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  node_id TEXT UNIQUE NOT NULL, -- e.g. ESP-NODE-302A
+  node_id TEXT UNIQUE NOT NULL, -- e.g. ESP-NODE-101A
   name TEXT NOT NULL,
   lab_room TEXT NOT NULL,
   cluster TEXT NOT NULL,
@@ -170,7 +187,10 @@ CREATE TABLE IF NOT EXISTS public.esp32_nodes (
 );
 
 ALTER TABLE public.esp32_nodes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "ESP32 nodes viewable by authenticated users" ON public.esp32_nodes;
 CREATE POLICY "ESP32 nodes viewable by authenticated users" ON public.esp32_nodes FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Admins can manage nodes" ON public.esp32_nodes;
 CREATE POLICY "Admins can manage nodes" ON public.esp32_nodes FOR ALL USING (
   (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'ADMIN'
 );
@@ -202,11 +222,17 @@ CREATE TABLE IF NOT EXISTS public.loaner_requests (
 );
 
 ALTER TABLE public.loaner_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Loaner items viewable by all" ON public.loaner_items;
 CREATE POLICY "Loaner items viewable by all" ON public.loaner_items FOR SELECT USING (true);
 
 ALTER TABLE public.loaner_requests ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Loaner requests viewable by all" ON public.loaner_requests;
 CREATE POLICY "Loaner requests viewable by all" ON public.loaner_requests FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Students can request loaners" ON public.loaner_requests;
 CREATE POLICY "Students can request loaners" ON public.loaner_requests FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Admins and Techs can update loaners" ON public.loaner_requests;
 CREATE POLICY "Admins and Techs can update loaners" ON public.loaner_requests FOR UPDATE USING (
   (SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('TECHNICIAN', 'ADMIN')
 );
@@ -225,6 +251,7 @@ CREATE TABLE IF NOT EXISTS public.technician_invite_codes (
 );
 
 ALTER TABLE public.technician_invite_codes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admins can manage invite codes" ON public.technician_invite_codes;
 CREATE POLICY "Admins can manage invite codes" ON public.technician_invite_codes FOR ALL USING (
   (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'ADMIN'
 );
@@ -239,7 +266,10 @@ CREATE TABLE IF NOT EXISTS public.whitelisted_technicians (
 );
 
 ALTER TABLE public.whitelisted_technicians ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allowlist viewable by authenticated users" ON public.whitelisted_technicians;
 CREATE POLICY "Allowlist viewable by authenticated users" ON public.whitelisted_technicians FOR SELECT USING (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "Admins can manage allowlist" ON public.whitelisted_technicians;
 CREATE POLICY "Admins can manage allowlist" ON public.whitelisted_technicians FOR ALL USING (
   (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'ADMIN'
 );
@@ -255,7 +285,93 @@ CREATE TABLE IF NOT EXISTS public.account_lockouts (
 );
 
 ALTER TABLE public.account_lockouts ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Lockout status viewable by anyone" ON public.account_lockouts;
 CREATE POLICY "Lockout status viewable by anyone" ON public.account_lockouts FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Service role can manage lockouts" ON public.account_lockouts;
 CREATE POLICY "Service role can manage lockouts" ON public.account_lockouts FOR ALL USING (true);
+
+-- ==============================================================================
+-- 11. INITIAL SEED DATA FOR LAB ROOMS (LAB-101 to LAB-105)
+-- ==============================================================================
+INSERT INTO public.labs (code, name, building, floor, capacity, active_stations, cluster_master, status)
+VALUES
+  ('LAB-101', 'Embedded Systems & IoT Lab', 'Turing Engineering Hall', '1st Floor', 24, 22, 'ESP-NODE-101A', 'OPERATIONAL'),
+  ('LAB-102', 'Introductory Computing Lab', 'Turing Engineering Hall', '1st Floor', 20, 19, 'ESP-NODE-102A', 'OPERATIONAL'),
+  ('LAB-103', 'Digital Logic & Circuitry', 'Shannon Tech Center', '1st Floor', 18, 17, 'ESP-NODE-103A', 'OPERATIONAL'),
+  ('LAB-104', 'Microcontroller Design Lab', 'Shannon Tech Center', '1st Floor', 24, 23, 'ESP-NODE-104A', 'OPERATIONAL'),
+  ('LAB-105', 'AI & High Performance Studio', 'Von Neumann Center', '1st Floor', 16, 16, 'ESP-NODE-105A', 'OPERATIONAL')
+ON CONFLICT (code) DO UPDATE SET
+  name = EXCLUDED.name,
+  building = EXCLUDED.building,
+  floor = EXCLUDED.floor,
+  capacity = EXCLUDED.capacity,
+  active_stations = EXCLUDED.active_stations,
+  cluster_master = EXCLUDED.cluster_master,
+  status = EXCLUDED.status;
+
+-- ==============================================================================
+-- 12. INITIAL SEED DATA FOR WORKSTATIONS (PC-01 to PC-20 for each Lab)
+-- ==============================================================================
+DO $$
+DECLARE
+  l RECORD;
+  i INT;
+  formatted_pc TEXT;
+  st TEXT;
+  iss TEXT;
+BEGIN
+  FOR l IN SELECT code, capacity FROM public.labs LOOP
+    FOR i IN 1..l.capacity LOOP
+      formatted_pc := 'PC-' || LPAD(i::text, 2, '0');
+      
+      -- Default online, assign sample statuses to match realistic lab
+      IF (l.code = 'LAB-101' AND i = 7) THEN
+        st := 'UNDER_REPAIR';
+        iss := 'Monitor backlight failure';
+      ELSIF (l.code = 'LAB-101' AND i = 18) THEN
+        st := 'UNDER_REPAIR';
+        iss := 'Power supply fault';
+      ELSIF (l.code = 'LAB-102' AND i = 12) THEN
+        st := 'UNDER_REPAIR';
+        iss := 'Ethernet DHCP warning';
+      ELSIF (i % 4 = 0) THEN
+        st := 'OCCUPIED';
+        iss := NULL;
+      ELSE
+        st := 'ONLINE';
+        iss := NULL;
+      END IF;
+
+      INSERT INTO public.workstations (pc_num, lab_code, status, ip_address, specs, active_issue)
+      VALUES (
+        formatted_pc,
+        l.code,
+        st,
+        '10.12.' || SUBSTRING(l.code FROM 5) || '.' || (10 + i)::text,
+        'Intel Core i7 · 32GB RAM · RTX 4060',
+        iss
+      )
+      ON CONFLICT (lab_code, pc_num) DO UPDATE SET
+        status = EXCLUDED.status,
+        active_issue = EXCLUDED.active_issue;
+    END LOOP;
+  END LOOP;
+END $$;
+
+-- ==============================================================================
+-- 13. ENABLE SUPABASE REALTIME REPLICATION FOR LIVE SYNC
+-- ==============================================================================
+DO $$
+BEGIN
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.workstations, public.tickets, public.labs;
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+    WHEN others THEN NULL;
+  END;
+END $$;
+
+
 
 

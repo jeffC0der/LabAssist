@@ -13,7 +13,9 @@ export function isUmakEmail(email: string): boolean {
     lower === 'labadmin@gmail.com' ||
     lower === 'labadmin@campus.edu' ||
     lower === 'labadmin' ||
-    lower === 'admin@campus.edu'
+    lower === 'admin@campus.edu' ||
+    lower === 'labassist4umak@gmail.com' ||
+    lower === 'umak.labassist@gmail.com'
   ) {
     return true;
   }
@@ -49,7 +51,7 @@ export interface PasswordStrength {
 
 export function checkPasswordStrength(password: string): PasswordStrength {
   const checks = {
-    length:    password.length >= 8,
+    length:    password.length >= 16,
     uppercase: /[A-Z]/.test(password),
     lowercase: /[a-z]/.test(password),
     number:    /[0-9]/.test(password),

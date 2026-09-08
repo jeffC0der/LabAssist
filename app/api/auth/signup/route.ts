@@ -33,24 +33,36 @@ export async function POST(request: Request) {
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedName = (name || '').trim() || trimmedEmail.split('@')[0];
 
-    // Restrict registration exclusively to @umak.edu.ph domain (or system root admin)
-    const isRootAdmin =
+    // Restrict registration exclusively to @umak.edu.ph domain (or system root accounts)
+    const isAuthorizedExternal =
       trimmedEmail === 'labadmin@gmail.com' ||
       trimmedEmail === 'labadmin@campus.edu' ||
       trimmedEmail === 'labadmin' ||
-      trimmedEmail === 'admin@campus.edu';
+      trimmedEmail === 'admin@campus.edu' ||
+      trimmedEmail === 'labassist4umak@gmail.com' ||
+      trimmedEmail === 'umak.labassist@gmail.com';
 
-    if (!trimmedEmail.endsWith('@umak.edu.ph') && !isRootAdmin) {
+    if (!trimmedEmail.endsWith('@umak.edu.ph') && !isAuthorizedExternal) {
       return NextResponse.json(
         { error: 'Access restricted: Only @umak.edu.ph email addresses are authorized to register.' },
         { status: 403 }
       );
     }
 
-    // Resolve role: check whitelisted_technicians allowlist for auto TECHNICIAN assignment
+    // Resolve role: check admin list, technician list, or whitelisted_technicians allowlist
     let assignedRole = 'STUDENT';
-    if (trimmedEmail === 'labadmin@gmail.com' || trimmedEmail === 'labadmin@campus.edu') {
+    let assignedDept = 'Undergraduate Engineering';
+
+    if (
+      trimmedEmail === 'labadmin@gmail.com' ||
+      trimmedEmail === 'labadmin@campus.edu' ||
+      trimmedEmail === 'labassist4umak@gmail.com'
+    ) {
       assignedRole = 'ADMIN';
+      assignedDept = 'Laboratory Administration';
+    } else if (trimmedEmail === 'umak.labassist@gmail.com') {
+      assignedRole = 'TECHNICIAN';
+      assignedDept = 'Hardware Maintenance Div.';
     } else {
       try {
         const { data: wl } = await supabaseAdmin
@@ -58,7 +70,10 @@ export async function POST(request: Request) {
           .select('email')
           .eq('email', trimmedEmail)
           .maybeSingle();
-        if (wl) assignedRole = 'TECHNICIAN';
+        if (wl) {
+          assignedRole = 'TECHNICIAN';
+          assignedDept = 'Hardware Maintenance Div.';
+        }
       } catch {
         // Table may not exist yet — default to STUDENT
       }
@@ -73,7 +88,7 @@ export async function POST(request: Request) {
         name: trimmedName,
         full_name: trimmedName,
         role: assignedRole,
-        department: 'Undergraduate Engineering',
+        department: assignedDept,
       },
     });
 
@@ -97,9 +112,9 @@ export async function POST(request: Request) {
         id: data.user.id,
         email: trimmedEmail,
         name: trimmedName,
-        role: 'STUDENT',
+        role: assignedRole,
         avatar: trimmedName.substring(0, 2).toUpperCase(),
-        department: 'Undergraduate Engineering',
+        department: assignedDept,
       });
     } catch (profileErr) {
       console.warn('Admin profile creation warning:', profileErr);
@@ -111,9 +126,19 @@ export async function POST(request: Request) {
         id: data.user.id,
         email: trimmedEmail,
         full_name: trimmedName,
-        role: 'STUDENT',
+        role: assignedRole,
       });
     } catch {}
+
+    // Ensure technician is in whitelisted_technicians
+    if (assignedRole === 'TECHNICIAN') {
+      try {
+        await supabaseAdmin.from('whitelisted_technicians').upsert({
+          email: trimmedEmail,
+          department: assignedDept,
+        });
+      } catch {}
+    }
 
     return NextResponse.json({
       user: data.user,

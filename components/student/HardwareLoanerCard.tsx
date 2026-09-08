@@ -13,7 +13,7 @@ export default function HardwareLoanerCard() {
   const [selectedItemId, setSelectedItemId] = useState<string>(MOCK_LOANER_ITEMS[0].id);
   const [studentName, setStudentName] = useState<string>('Marcus Vance');
   const [studentId, setStudentId] = useState<string>('2024-88912');
-  const [labRoom, setLabRoom] = useState<string>('LAB-302');
+  const [labRoom, setLabRoom] = useState<string>('LAB-101');
   const [duration, setDuration] = useState<string>('2 Hours (Class Lab)');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'REQUEST' | 'ACTIVE_LOANS'>('REQUEST');

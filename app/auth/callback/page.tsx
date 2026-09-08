@@ -36,7 +36,11 @@ export default function AuthCallbackPage() {
           process.env.NEXT_PUBLIC_REQUIRE_OTP === 'false';
 
         // Admin email: bypass OTP, go straight to admin portal.
-        if (email === 'labadmin@gmail.com' || email === 'labadmin@campus.edu') {
+        if (
+          email === 'labadmin@gmail.com' ||
+          email === 'labadmin@campus.edu' ||
+          email === 'labassist4umak@gmail.com'
+        ) {
           setStatusMsg('Admin account detected. Loading portal…');
           router.replace('/admin');
           return;
@@ -48,6 +52,25 @@ export default function AuthCallbackPage() {
           supabase.from('profiles').select('id, role').eq('id', user.id).maybeSingle(),
           supabase.from('users').select('id, role').eq('id', user.id).maybeSingle(),
         ]);
+
+        // If user has Login OTP (2FA) enabled
+        if (meta.require_login_otp) {
+          setStatusMsg('Two-factor verification enabled — sending login code…');
+          try {
+            await fetch('/api/send-otp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email, name: fullName, purpose: 'login' }),
+            });
+          } catch (otpErr) {
+            console.warn('Brevo send-otp warning:', otpErr);
+          }
+
+          router.replace(
+            `/auth/verify-otp?email=${encodeURIComponent(email)}&type=login&name=${encodeURIComponent(fullName)}`
+          );
+          return;
+        }
 
         if (isOtpDisabled || profileRow || userRow) {
           // If first-time user and OTP is disabled, auto-populate DB records

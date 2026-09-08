@@ -8,7 +8,7 @@ import { Sparkles, Cpu, HelpCircle } from 'lucide-react';
 
 export default function StudentPortal() {
   const [selectedStation, setSelectedStation] = useState<{ lab: string; pcNum: string } | null>({
-    lab: 'LAB-302',
+    lab: 'LAB-101',
     pcNum: 'PC-07',
   });
 

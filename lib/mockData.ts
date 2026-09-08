@@ -40,7 +40,7 @@ const minsAgo = (m: number) => new Date(now.getTime() - m * 60000).toISOString()
 export const MOCK_TICKETS: Ticket[] = [
   {
     ticket_id: 'TKT-2401',
-    lab_id: 'LAB-302',
+    lab_id: 'LAB-101',
     pc_num: 'PC-07',
     category: 'DISPLAY',
     key: 'A',
@@ -52,7 +52,7 @@ export const MOCK_TICKETS: Ticket[] = [
   },
   {
     ticket_id: 'TKT-2402',
-    lab_id: 'LAB-101',
+    lab_id: 'LAB-102',
     pc_num: 'PC-12',
     category: 'NET/SOFTWARE',
     key: 'D',
@@ -65,7 +65,7 @@ export const MOCK_TICKETS: Ticket[] = [
   },
   {
     ticket_id: 'TKT-2403',
-    lab_id: 'LAB-204',
+    lab_id: 'LAB-103',
     pc_num: 'PC-03',
     category: 'POWER/UPS',
     key: 'C',
@@ -77,7 +77,7 @@ export const MOCK_TICKETS: Ticket[] = [
   },
   {
     ticket_id: 'TKT-2404',
-    lab_id: 'LAB-302',
+    lab_id: 'LAB-101',
     pc_num: 'PC-15',
     category: 'PERIPHERALS',
     key: 'B',
@@ -92,7 +92,7 @@ export const MOCK_TICKETS: Ticket[] = [
   },
   {
     ticket_id: 'TKT-2405',
-    lab_id: 'LAB-401',
+    lab_id: 'LAB-105',
     pc_num: 'PC-09',
     category: 'DISPLAY',
     key: 'A',
@@ -105,7 +105,7 @@ export const MOCK_TICKETS: Ticket[] = [
   },
   {
     ticket_id: 'TKT-2406',
-    lab_id: 'LAB-101',
+    lab_id: 'LAB-102',
     pc_num: 'PC-01',
     category: 'NET/SOFTWARE',
     key: 'D',
@@ -120,7 +120,7 @@ export const MOCK_TICKETS: Ticket[] = [
   },
   {
     ticket_id: 'TKT-2407',
-    lab_id: 'LAB-205',
+    lab_id: 'LAB-104',
     pc_num: 'PC-22',
     category: 'PERIPHERALS',
     key: 'B',
@@ -132,7 +132,7 @@ export const MOCK_TICKETS: Ticket[] = [
   },
   {
     ticket_id: 'TKT-2408',
-    lab_id: 'LAB-302',
+    lab_id: 'LAB-101',
     pc_num: 'PC-18',
     category: 'POWER/UPS',
     key: 'C',
@@ -144,7 +144,7 @@ export const MOCK_TICKETS: Ticket[] = [
   },
   {
     ticket_id: 'TKT-2409',
-    lab_id: 'LAB-401',
+    lab_id: 'LAB-105',
     pc_num: 'PC-11',
     category: 'NET/SOFTWARE',
     key: 'D',
@@ -157,7 +157,7 @@ export const MOCK_TICKETS: Ticket[] = [
   },
   {
     ticket_id: 'TKT-2410',
-    lab_id: 'LAB-204',
+    lab_id: 'LAB-103',
     pc_num: 'PC-06',
     category: 'DISPLAY',
     key: 'A',
@@ -172,7 +172,7 @@ export const MOCK_TICKETS: Ticket[] = [
   },
   {
     ticket_id: 'TKT-2411',
-    lab_id: 'LAB-101',
+    lab_id: 'LAB-102',
     pc_num: 'PC-19',
     category: 'PERIPHERALS',
     key: 'B',
@@ -184,7 +184,7 @@ export const MOCK_TICKETS: Ticket[] = [
   },
   {
     ticket_id: 'TKT-2412',
-    lab_id: 'LAB-205',
+    lab_id: 'LAB-104',
     pc_num: 'PC-04',
     category: 'POWER/UPS',
     key: 'C',
@@ -199,7 +199,7 @@ export const MOCK_TICKETS: Ticket[] = [
   },
 ];
 
-export const LAB_ROOMS = ['All Labs', 'LAB-101', 'LAB-204', 'LAB-205', 'LAB-302', 'LAB-401'];
+export const LAB_ROOMS = ['All Labs', 'LAB-101', 'LAB-102', 'LAB-103', 'LAB-104', 'LAB-105'];
 
 export const MOCK_USER = {
   name: 'Alex Reyes',
@@ -242,7 +242,7 @@ export type WorkstationStatus = 'ONLINE' | 'OCCUPIED' | 'UNDER_REPAIR';
 
 export interface Workstation {
   id: string; // e.g. PC-01
-  labId: string; // e.g. LAB-302
+  labId: string; // e.g. LAB-101
   status: WorkstationStatus;
   user?: string;
   ip: string;
@@ -275,7 +275,7 @@ export interface LoanerRequest {
 }
 
 export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
-  'LAB-302': Array.from({ length: 24 }, (_, i) => {
+  'LAB-101': Array.from({ length: 24 }, (_, i) => {
     const num = String(i + 1).padStart(2, '0');
     const id = `PC-${num}`;
     let status: WorkstationStatus = 'ONLINE';
@@ -295,16 +295,16 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
 
     return {
       id,
-      labId: 'LAB-302',
+      labId: 'LAB-101',
       status,
       user,
-      ip: `10.12.30.${10 + i}`,
+      ip: `10.12.101.${10 + i}`,
       specs: 'Core i7-13700 · 32GB RAM · RTX 4070',
       lastPing: '2s ago',
       activeIssue,
     };
   }),
-  'LAB-101': Array.from({ length: 20 }, (_, i) => {
+  'LAB-102': Array.from({ length: 20 }, (_, i) => {
     const num = String(i + 1).padStart(2, '0');
     const id = `PC-${num}`;
     let status: WorkstationStatus = 'ONLINE';
@@ -325,16 +325,16 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
 
     return {
       id,
-      labId: 'LAB-101',
+      labId: 'LAB-102',
       status,
       user,
-      ip: `10.12.10.${10 + i}`,
+      ip: `10.12.102.${10 + i}`,
       specs: 'Core i5-12600 · 16GB RAM · GTX 1660',
       lastPing: '3s ago',
       activeIssue,
     };
   }),
-  'LAB-204': Array.from({ length: 18 }, (_, i) => {
+  'LAB-103': Array.from({ length: 18 }, (_, i) => {
     const num = String(i + 1).padStart(2, '0');
     const id = `PC-${num}`;
     let status: WorkstationStatus = 'ONLINE';
@@ -351,16 +351,16 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
 
     return {
       id,
-      labId: 'LAB-204',
+      labId: 'LAB-103',
       status,
       user,
-      ip: `10.12.20.${10 + i}`,
+      ip: `10.12.103.${10 + i}`,
       specs: 'Ryzen 7 5800X · 32GB RAM · RTX 3060',
       lastPing: '1s ago',
       activeIssue,
     };
   }),
-  'LAB-205': Array.from({ length: 24 }, (_, i) => {
+  'LAB-104': Array.from({ length: 24 }, (_, i) => {
     const num = String(i + 1).padStart(2, '0');
     const id = `PC-${num}`;
     let status: WorkstationStatus = 'ONLINE';
@@ -377,16 +377,16 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
 
     return {
       id,
-      labId: 'LAB-205',
+      labId: 'LAB-104',
       status,
       user,
-      ip: `10.12.25.${10 + i}`,
+      ip: `10.12.104.${10 + i}`,
       specs: 'Core i7-12700 · 32GB RAM · RTX 3070',
       lastPing: '4s ago',
       activeIssue,
     };
   }),
-  'LAB-401': Array.from({ length: 16 }, (_, i) => {
+  'LAB-105': Array.from({ length: 16 }, (_, i) => {
     const num = String(i + 1).padStart(2, '0');
     const id = `PC-${num}`;
     let status: WorkstationStatus = 'ONLINE';
@@ -404,10 +404,10 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
 
     return {
       id,
-      labId: 'LAB-401',
+      labId: 'LAB-105',
       status,
       user,
-      ip: `10.12.40.${10 + i}`,
+      ip: `10.12.105.${10 + i}`,
       specs: 'Apple Mac Studio M2 Max · 64GB Unified',
       lastPing: '2s ago',
       activeIssue,
@@ -433,7 +433,7 @@ export const MOCK_LOANER_REQUESTS: LoanerRequest[] = [
     itemName: 'ESP32-S3 Dual-Core Dev Kit',
     studentName: 'Marcus Vance',
     studentId: '2024-88912',
-    labRoom: 'LAB-302',
+    labRoom: 'LAB-101',
     duration: '2 Hours (Class Lab)',
     requestedAt: '12m ago',
     status: 'APPROVED',
@@ -445,7 +445,7 @@ export const MOCK_LOANER_REQUESTS: LoanerRequest[] = [
     itemName: 'USB-C to 4K 60Hz HDMI Adapter',
     studentName: 'Clara Chen',
     studentId: '2023-74120',
-    labRoom: 'LAB-101',
+    labRoom: 'LAB-102',
     duration: 'Full Session',
     requestedAt: '35m ago',
     status: 'CHECKED_OUT',
@@ -474,9 +474,9 @@ export interface ESP32Node {
 
 export const MOCK_ESP32_FLEET: ESP32Node[] = [
   {
-    id: 'ESP-NODE-302A',
-    name: 'Lab 302 South Cluster Hub',
-    labRoom: 'LAB-302',
+    id: 'ESP-NODE-101A',
+    name: 'Lab 101 South Cluster Hub',
+    labRoom: 'LAB-101',
     cluster: 'Cluster Alpha (PC 01-12)',
     macAddress: '24:6F:28:B1:3C:4E',
     ipAddress: '192.168.4.102',
@@ -490,9 +490,9 @@ export const MOCK_ESP32_FLEET: ESP32Node[] = [
     assignedStations: 'PC-01 – PC-12',
   },
   {
-    id: 'ESP-NODE-302B',
-    name: 'Lab 302 North Cluster Hub',
-    labRoom: 'LAB-302',
+    id: 'ESP-NODE-101B',
+    name: 'Lab 101 North Cluster Hub',
+    labRoom: 'LAB-101',
     cluster: 'Cluster Beta (PC 13-24)',
     macAddress: '24:6F:28:B1:3C:5F',
     ipAddress: '192.168.4.103',
@@ -506,9 +506,9 @@ export const MOCK_ESP32_FLEET: ESP32Node[] = [
     assignedStations: 'PC-13 – PC-24',
   },
   {
-    id: 'ESP-NODE-101A',
-    name: 'Lab 101 Main Gateway',
-    labRoom: 'LAB-101',
+    id: 'ESP-NODE-102A',
+    name: 'Lab 102 Main Gateway',
+    labRoom: 'LAB-102',
     cluster: 'Cluster Main (PC 01-20)',
     macAddress: 'A0:B7:65:F4:11:2D',
     ipAddress: '192.168.4.105',
@@ -522,9 +522,9 @@ export const MOCK_ESP32_FLEET: ESP32Node[] = [
     assignedStations: 'PC-01 – PC-20',
   },
   {
-    id: 'ESP-NODE-204A',
-    name: 'Lab 204 Embedded Master Hub',
-    labRoom: 'LAB-204',
+    id: 'ESP-NODE-103A',
+    name: 'Lab 103 Embedded Master Hub',
+    labRoom: 'LAB-103',
     cluster: 'Cluster Core (PC 01-18)',
     macAddress: '3C:71:BF:8E:22:90',
     ipAddress: '192.168.4.110',
@@ -538,9 +538,9 @@ export const MOCK_ESP32_FLEET: ESP32Node[] = [
     assignedStations: 'PC-01 – PC-18',
   },
   {
-    id: 'ESP-NODE-205A',
-    name: 'Lab 205 Electronics Cluster',
-    labRoom: 'LAB-205',
+    id: 'ESP-NODE-104A',
+    name: 'Lab 104 Electronics Cluster',
+    labRoom: 'LAB-104',
     cluster: 'Cluster Alpha (PC 01-24)',
     macAddress: '58:BF:25:AA:99:1C',
     ipAddress: '192.168.4.114',
@@ -554,9 +554,9 @@ export const MOCK_ESP32_FLEET: ESP32Node[] = [
     assignedStations: 'PC-01 – PC-24',
   },
   {
-    id: 'ESP-NODE-401A',
-    name: 'Lab 401 Apple Studio Hub',
-    labRoom: 'LAB-401',
+    id: 'ESP-NODE-105A',
+    name: 'Lab 105 Apple Studio Hub',
+    labRoom: 'LAB-105',
     cluster: 'Cluster Mac (PC 01-16)',
     macAddress: '84:CC:A8:54:E3:7A',
     ipAddress: '192.168.4.120',
@@ -662,63 +662,63 @@ export interface LabRoomConfig {
 
 export const MOCK_LAB_ROOMS_CONFIG: LabRoomConfig[] = [
   {
-    id: 'ROOM-302',
-    code: 'LAB-302',
+    id: 'ROOM-101',
+    code: 'LAB-101',
     name: 'Embedded Systems & IoT Lab',
     building: 'Turing Engineering Hall',
     floor: '3rd Floor',
     capacity: 24,
     activeStations: 22,
     mappedMacs: ['24:6F:28:B1:3C:4E', '24:6F:28:B1:3C:5F'],
-    clusterMaster: 'ESP-NODE-302A',
+    clusterMaster: 'ESP-NODE-101A',
     status: 'OPERATIONAL',
   },
   {
-    id: 'ROOM-101',
-    code: 'LAB-101',
+    id: 'ROOM-102',
+    code: 'LAB-102',
     name: 'Introductory Computing Lab',
     building: 'Turing Engineering Hall',
     floor: '1st Floor',
     capacity: 20,
     activeStations: 19,
     mappedMacs: ['A0:B7:65:F4:11:2D'],
-    clusterMaster: 'ESP-NODE-101A',
+    clusterMaster: 'ESP-NODE-102A',
     status: 'OPERATIONAL',
   },
   {
-    id: 'ROOM-204',
-    code: 'LAB-204',
+    id: 'ROOM-103',
+    code: 'LAB-103',
     name: 'Digital Logic & Circuitry',
     building: 'Shannon Tech Center',
     floor: '2nd Floor',
     capacity: 18,
     activeStations: 17,
     mappedMacs: ['3C:71:BF:8E:22:90'],
-    clusterMaster: 'ESP-NODE-204A',
+    clusterMaster: 'ESP-NODE-103A',
     status: 'OPERATIONAL',
   },
   {
-    id: 'ROOM-205',
-    code: 'LAB-205',
+    id: 'ROOM-104',
+    code: 'LAB-104',
     name: 'Microcontroller Design Lab',
     building: 'Shannon Tech Center',
     floor: '2nd Floor',
     capacity: 24,
     activeStations: 23,
     mappedMacs: ['58:BF:25:AA:99:1C'],
-    clusterMaster: 'ESP-NODE-205A',
+    clusterMaster: 'ESP-NODE-104A',
     status: 'OPERATIONAL',
   },
   {
-    id: 'ROOM-401',
-    code: 'LAB-401',
+    id: 'ROOM-105',
+    code: 'LAB-105',
     name: 'AI & High Performance Studio',
     building: 'Von Neumann Center',
     floor: '4th Floor',
     capacity: 16,
     activeStations: 16,
     mappedMacs: ['84:CC:A8:54:E3:7A'],
-    clusterMaster: 'ESP-NODE-401A',
+    clusterMaster: 'ESP-NODE-105A',
     status: 'OPERATIONAL',
   },
 ];

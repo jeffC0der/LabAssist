@@ -41,6 +41,7 @@ declare global {
 
 interface GoogleButtonProps {
   onNewGoogleUser?: (email: string, name: string) => void;
+  onOtpRequired?: (email: string, name: string) => void;
 }
 
 /**
@@ -50,7 +51,7 @@ interface GoogleButtonProps {
  *
  * The resulting ID Token is passed to Supabase via signInWithIdToken.
  */
-export default function GoogleButton({ onNewGoogleUser }: GoogleButtonProps) {
+export default function GoogleButton({ onNewGoogleUser, onOtpRequired }: GoogleButtonProps) {
   const { signInWithGoogleIdToken, isLoading: authLoading } = useAuth();
   const toast = useToast();
   const router = useRouter();
@@ -75,6 +76,14 @@ export default function GoogleButton({ onNewGoogleUser }: GoogleButtonProps) {
           return;
         }
 
+        if (result.requireOtp) {
+          toast.info('Verification Code Sent', `A 6-digit login verification code was sent to ${result.email}`);
+          if (onOtpRequired) {
+            onOtpRequired(result.email || '', result.name || '');
+          }
+          return;
+        }
+
         const loggedInUser = result.user!;
         toast.success('Welcome back!', `Signed in as ${loggedInUser.name || loggedInUser.email}`);
         if (loggedInUser.role === 'ADMIN') {
@@ -91,7 +100,7 @@ export default function GoogleButton({ onNewGoogleUser }: GoogleButtonProps) {
         setIsSubmitting(false);
       }
     },
-    [signInWithGoogleIdToken, toast, router]
+    [signInWithGoogleIdToken, toast, router, onNewGoogleUser, onOtpRequired]
   );
 
   // ── Initialize GIS and render the Google button ───────────────────────────

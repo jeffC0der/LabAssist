@@ -18,6 +18,7 @@ export type AuthView =
   | 'signin'
   | 'signup'
   | 'verify_signup_otp'
+  | 'verify_login_otp'
   | 'forgot_email'
   | 'forgot_otp'
   | 'forgot_new_password'
@@ -56,6 +57,9 @@ export default function AuthCard() {
     updateNewPassword,
     checkLockoutStatus,
     completeGoogleSignupWithPassword,
+    requestLoginOtp,
+    verifyLoginOtp,
+    checkEmailRequiresOtp,
     isLoading,
   } = useAuth();
   const toast = useToast();
@@ -208,12 +212,27 @@ export default function AuthCard() {
     if (!emailValidation.valid || password.length === 0 || isLoading || isLocked) return;
     resetErrors();
 
+    const cleanEmail = email.trim().toLowerCase();
+
     try {
-      const loggedInUser = await signIn(email, password);
+      // Check if user account has Login OTP enabled
+      const otpStatus = await checkEmailRequiresOtp(cleanEmail);
+
+      if (otpStatus.requireOtp) {
+        // Send Brevo OTP code for login
+        await requestLoginOtp(cleanEmail, otpStatus.name);
+        setView('verify_login_otp');
+        setResendCooldown(60);
+        toast.info('Login Code Sent', `A 6-digit verification code was sent to ${cleanEmail}`);
+        return;
+      }
+
+      // Standard direct password login
+      const loggedInUser = await signIn(cleanEmail, password);
       setIsLocked(false);
       setLockSecondsRemaining(0);
       setAttemptsRemaining(null);
-      toast.success('Welcome back!', `Signed in as ${loggedInUser.name || email}`);
+      toast.success('Welcome back!', `Signed in as ${loggedInUser.name || cleanEmail}`);
       if (loggedInUser.role === 'ADMIN') {
         router.push('/admin');
       } else if (loggedInUser.role === 'TECHNICIAN') {
@@ -233,6 +252,54 @@ export default function AuthCard() {
       const msg = err?.message || 'Invalid email or password';
       setAuthError(msg);
       toast.error(err?.isLocked ? 'Account Temporarily Locked' : 'Sign in failed', msg);
+    }
+  };
+
+  // ── 1b. Handle Verify Login OTP ─────────────────────────────────────────────
+  const handleVerifyLoginOtpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpOk || isLoading) return;
+    resetErrors();
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    try {
+      const loggedInUser = await verifyLoginOtp(cleanEmail, otpToken, password);
+      setIsLocked(false);
+      setLockSecondsRemaining(0);
+      setAttemptsRemaining(null);
+      toast.success('Verified & Signed In!', `Welcome back, ${loggedInUser.name || cleanEmail}!`);
+      if (loggedInUser.role === 'ADMIN') {
+        router.push('/admin');
+      } else if (loggedInUser.role === 'TECHNICIAN') {
+        router.push('/technician');
+      } else {
+        router.push('/student');
+      }
+    } catch (err: any) {
+      const msg = err?.message || 'Invalid or expired login code. Please try again.';
+      setAuthError(msg);
+      toast.error('Verification failed', msg);
+    }
+  };
+
+  // ── 1c. Handle Resend Login OTP ─────────────────────────────────────────────
+  const handleResendLoginOtp = async () => {
+    if (resendCooldown > 0 || isResending) return;
+    setIsResending(true);
+    resetErrors();
+    const cleanEmail = email.trim().toLowerCase();
+    try {
+      await requestLoginOtp(cleanEmail);
+      setResendCooldown(60);
+      setAuthSuccess(`A fresh 6-digit login code was sent to ${cleanEmail}.`);
+      toast.success('Code Resent', 'A new login verification code was sent to your email.');
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to resend login code. Please try again shortly.';
+      setAuthError(msg);
+      toast.error('Resend failed', msg);
+    } finally {
+      setIsResending(false);
     }
   };
 
@@ -397,11 +464,22 @@ export default function AuthCard() {
     setView('set_google_password');
   }, []);
 
+  // ── 9b. Handle Google user requiring 2FA login OTP ────────────────────────
+  const handleGoogleOtpRequired = useCallback((otpEmail: string, name: string) => {
+    setEmail(otpEmail);
+    setFullName(name);
+    setOtpToken('');
+    resetErrors();
+    setView('verify_login_otp');
+    setResendCooldown(60);
+    setAuthSuccess(`A 6-digit login verification code was sent to ${otpEmail}.`);
+  }, []);
+
   // ── 10. Complete Google signup with chosen password ────────────────────────
   const handleGooglePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (googlePassword.length < 8) {
-      setAuthError('Password must be at least 8 characters.');
+    if (googlePassword.length < 16) {
+      setAuthError('Password must be at least 16 characters.');
       return;
     }
     if (googlePassword !== googleConfirmPassword) {
@@ -506,7 +584,10 @@ export default function AuthCard() {
       {/* ────────────────────────────────────────────────────────────────────────── */}
       {view === 'signin' && (
         <div className="space-y-4">
-                        <GoogleButton onNewGoogleUser={handleNewGoogleUser} />
+          <GoogleButton
+            onNewGoogleUser={handleNewGoogleUser}
+            onOtpRequired={handleGoogleOtpRequired}
+          />
 
           <div className="flex items-center gap-3 my-5" role="separator" aria-label="Or continue with email">
             <div className="flex-1 h-px bg-slate-700" />
@@ -641,7 +722,10 @@ export default function AuthCard() {
       {/* ────────────────────────────────────────────────────────────────────────── */}
       {view === 'signup' && (
         <div className="space-y-4">
-                        <GoogleButton onNewGoogleUser={handleNewGoogleUser} />
+          <GoogleButton
+            onNewGoogleUser={handleNewGoogleUser}
+            onOtpRequired={handleGoogleOtpRequired}
+          />
 
           <div className="flex items-center gap-3 my-5" role="separator" aria-label="Or continue with email">
             <div className="flex-1 h-px bg-slate-700" />
@@ -854,6 +938,87 @@ export default function AuthCard() {
             >
               <ArrowLeft size={13} />
               <span>Back to Edit Registration Details</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* VIEW: VERIFY LOGIN OTP (2FA on Login)                                     */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {view === 'verify_login_otp' && (
+        <div className="space-y-5 animate-fade-in">
+          <div className="text-center space-y-1.5">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mx-auto mb-2 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+              <ShieldCheck size={24} />
+            </div>
+            <h2 className="text-lg font-bold text-slate-100">Two-Factor Authentication</h2>
+            <p className="text-xs text-slate-400 max-w-xs mx-auto">
+              Login OTP protection is enabled on your account. Enter the 6-digit code sent to <span className="text-emerald-300 font-mono font-semibold">{email}</span>
+            </p>
+          </div>
+
+          <form onSubmit={handleVerifyLoginOtpSubmit} className="space-y-4" noValidate>
+            <div>
+              <label htmlFor="login-otp-0" className="block text-xs font-semibold text-slate-400 mb-2 text-center">
+                6-Digit Login Verification Code
+              </label>
+              <OtpInput
+                value={otpToken}
+                onChange={val => {
+                  setOtpToken(val);
+                  resetErrors();
+                }}
+                hasError={!!authError || (touched.otpToken && !otpOk && otpToken.length > 0)}
+                disabled={isLoading}
+                autoFocus={true}
+                idPrefix="login-otp"
+              />
+              {touched.otpToken && !otpOk && otpToken.length > 0 && (
+                <p className="text-xs text-rose-400 text-center mt-1.5 animate-fade-in">Please enter all 6 digits</p>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              disabled={!otpOk || isLoading}
+              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? (
+                <>
+                  <LoadingSpinner size={16} className="text-white" />
+                  <span>Verifying &amp; Signing In…</span>
+                </>
+              ) : (
+                <>
+                  <Check size={16} />
+                  <span>Verify OTP &amp; Enter Dashboard</span>
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* Resend button & Back link */}
+          <div className="pt-2 flex flex-col items-center gap-3 text-xs">
+            <button
+              type="button"
+              onClick={handleResendLoginOtp}
+              disabled={resendCooldown > 0 || isResending}
+              className="flex items-center gap-1.5 text-slate-400 hover:text-emerald-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw size={13} className={isResending ? 'animate-spin' : ''} />
+              <span>
+                {resendCooldown > 0 ? `Resend Code in ${resendCooldown}s` : 'Resend Login Code'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleSwitchView('signin')}
+              className="flex items-center gap-1.5 text-slate-500 hover:text-slate-300 transition-colors pt-1"
+            >
+              <ArrowLeft size={13} />
+              <span>Back to Password Sign In</span>
             </button>
           </div>
         </div>
@@ -1143,7 +1308,7 @@ export default function AuthCard() {
                   value={googlePassword}
                   onChange={e => setGooglePassword(e.target.value)}
                   className="input-field w-full pl-9 pr-10 py-2.5"
-                  placeholder="Min. 8 characters"
+                  placeholder="Min. 16 characters"
                   required
                 />
                 <button
@@ -1155,8 +1320,8 @@ export default function AuthCard() {
                   {showGooglePassword ? <EyeOff size={15} /> : <Eye size={15} />}
                 </button>
               </div>
-              {googlePassword.length > 0 && googlePassword.length < 8 && (
-                <p className="text-xs text-red-400 mt-1">Password must be at least 8 characters.</p>
+              {googlePassword.length > 0 && googlePassword.length < 16 && (
+                <p className="text-xs text-red-400 mt-1">Password must be at least 16 characters.</p>
               )}
             </div>
 
@@ -1193,7 +1358,7 @@ export default function AuthCard() {
 
             <button
               type="submit"
-              disabled={isLoading || googlePassword.length < 8 || googlePassword !== googleConfirmPassword}
+              disabled={isLoading || googlePassword.length < 16 || googlePassword !== googleConfirmPassword}
               className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(99,102,241,0.3)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (

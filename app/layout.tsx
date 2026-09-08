@@ -3,6 +3,7 @@ import './globals.css';
 import { ToastProvider } from '@/context/ToastContext';
 import { AuthProvider } from '@/context/AuthContext';
 import { TicketProvider } from '@/context/TicketContext';
+import { WorkstationProvider } from '@/context/WorkstationContext';
 import { RoleProvider } from '@/context/RoleContext';
 import { ToastContainer } from '@/components/shared/Toast';
 
@@ -40,8 +41,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <AuthProvider>
             <RoleProvider>
               <TicketProvider>
-                {children}
-                <ToastContainer />
+                <WorkstationProvider>
+                  {children}
+                  <ToastContainer />
+                </WorkstationProvider>
               </TicketProvider>
             </RoleProvider>
           </AuthProvider>

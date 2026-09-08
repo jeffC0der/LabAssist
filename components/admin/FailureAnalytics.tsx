@@ -57,11 +57,11 @@ export default function FailureAnalytics() {
 
   // Room failure density
   const labDensity = [
-    { room: 'LAB-302 (Embedded Systems)', count: 5, pct: 36, load: 'High Exposure' },
-    { room: 'LAB-101 (Intro Computing)', count: 3, pct: 24, load: 'Moderate' },
-    { room: 'LAB-204 (Digital Logic)', count: 2, pct: 18, load: 'Moderate' },
-    { room: 'LAB-401 (AI & Studio)', count: 2, pct: 14, load: 'Low Fault' },
-    { room: 'LAB-205 (Microcontrollers)', count: 1, pct: 8, load: 'Low Fault' },
+    { room: 'LAB-101 (Embedded Systems)', count: 5, pct: 36, load: 'High Exposure' },
+    { room: 'LAB-102 (Intro Computing)', count: 3, pct: 24, load: 'Moderate' },
+    { room: 'LAB-103 (Digital Logic)', count: 2, pct: 18, load: 'Moderate' },
+    { room: 'LAB-105 (AI & Studio)', count: 2, pct: 14, load: 'Low Fault' },
+    { room: 'LAB-104 (Microcontrollers)', count: 1, pct: 8, load: 'Low Fault' },
   ];
 
   // Time of Day Peak Distribution (8am to 8pm)

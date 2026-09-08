@@ -74,7 +74,7 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
   const { addTicket } = useTickets();
   const toast = useToast();
 
-  const [labRoom, setLabRoom] = useState<string>(initialLab || 'LAB-302');
+  const [labRoom, setLabRoom] = useState<string>(initialLab || 'LAB-101');
   const [pcNum, setPcNum] = useState<string>(initialPc || 'PC-07');
   const [selectedKey, setSelectedKey] = useState<TicketKey>('A');
   const [description, setDescription] = useState<string>('');

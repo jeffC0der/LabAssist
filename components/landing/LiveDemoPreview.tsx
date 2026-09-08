@@ -10,9 +10,9 @@ const KEY_MAPPINGS = [
 ];
 
 const DEMO_TICKETS = [
-  { id: 'TKT-2401', lab: 'LAB-302', pc: 'PC-07', key: 'A', delay: 0 },
-  { id: 'TKT-2402', lab: 'LAB-101', pc: 'PC-12', key: 'D', delay: 1200 },
-  { id: 'TKT-2403', lab: 'LAB-204', pc: 'PC-03', key: 'C', delay: 2400 },
+  { id: 'TKT-2401', lab: 'LAB-101', pc: 'PC-07', key: 'A', delay: 0 },
+  { id: 'TKT-2402', lab: 'LAB-102', pc: 'PC-12', key: 'D', delay: 1200 },
+  { id: 'TKT-2403', lab: 'LAB-103', pc: 'PC-03', key: 'C', delay: 2400 },
 ];
 
 export default function LiveDemoPreview() {

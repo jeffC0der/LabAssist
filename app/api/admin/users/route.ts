@@ -46,7 +46,14 @@ export async function GET() {
       if (!profileMap.has(au.id) && !profileMap.has(email)) {
         const meta = au.user_metadata || {};
         const name = meta.full_name || meta.name || email.split('@')[0];
-        const role = email === 'labadmin@gmail.com' || email === 'labadmin@campus.edu' ? 'ADMIN' : (meta.role || 'STUDENT');
+        const role =
+          email === 'labadmin@gmail.com' ||
+          email === 'labadmin@campus.edu' ||
+          email === 'labassist4umak@gmail.com'
+            ? 'ADMIN'
+            : email === 'umak.labassist@gmail.com'
+            ? 'TECHNICIAN'
+            : (meta.role || 'STUDENT');
         combinedUsers.push({
           id: au.id,
           email: au.email,

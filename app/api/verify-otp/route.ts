@@ -67,8 +67,18 @@ export async function POST(request: Request) {
 
     // Resolve Role: check allowlist for TECHNICIAN, root check for ADMIN, default STUDENT
     let assignedRole = 'STUDENT';
-    if (cleanEmail === 'labadmin@gmail.com' || cleanEmail === 'labadmin@campus.edu') {
+    let assignedDept = 'Undergraduate Engineering';
+
+    if (
+      cleanEmail === 'labadmin@gmail.com' ||
+      cleanEmail === 'labadmin@campus.edu' ||
+      cleanEmail === 'labassist4umak@gmail.com'
+    ) {
       assignedRole = 'ADMIN';
+      assignedDept = 'Laboratory Administration';
+    } else if (cleanEmail === 'umak.labassist@gmail.com') {
+      assignedRole = 'TECHNICIAN';
+      assignedDept = 'Hardware Maintenance Div.';
     } else if (supabaseAdmin) {
       try {
         const { data: wl } = await supabaseAdmin
@@ -76,7 +86,10 @@ export async function POST(request: Request) {
           .select('email')
           .eq('email', cleanEmail)
           .maybeSingle();
-        if (wl) assignedRole = 'TECHNICIAN';
+        if (wl) {
+          assignedRole = 'TECHNICIAN';
+          assignedDept = 'Hardware Maintenance Div.';
+        }
       } catch {}
     }
 
@@ -94,7 +107,7 @@ export async function POST(request: Request) {
             name: cleanName,
             full_name: cleanName,
             role: assignedRole,
-            department: 'Undergraduate Engineering',
+            department: assignedDept,
           },
         });
 
@@ -114,7 +127,7 @@ export async function POST(request: Request) {
                 name: cleanName,
                 full_name: cleanName,
                 role: assignedRole,
-                department: 'Undergraduate Engineering',
+                department: assignedDept,
               },
             });
           } else {
@@ -135,9 +148,18 @@ export async function POST(request: Request) {
               name: cleanName,
               role: assignedRole,
               avatar: cleanName.substring(0, 2).toUpperCase(),
-              department: 'Undergraduate Engineering',
+              department: assignedDept,
             });
           } catch {}
+
+          if (assignedRole === 'TECHNICIAN') {
+            try {
+              await supabaseAdmin.from('whitelisted_technicians').upsert({
+                email: cleanEmail,
+                department: assignedDept,
+              });
+            } catch {}
+          }
 
           try {
             await supabaseAdmin.from('users').upsert({

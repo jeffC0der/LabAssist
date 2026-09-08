@@ -16,7 +16,7 @@ export default function PasswordStrengthMeter({ password, strength: propStrength
   if (!strength) return null;
 
   const checks = [
-    { key: 'length',    label: 'At least 8 characters',          met: strength.checks.length },
+    { key: 'length',    label: 'At least 16 characters',         met: strength.checks.length },
     { key: 'uppercase', label: '1 uppercase letter (A–Z)',       met: strength.checks.uppercase },
     { key: 'lowercase', label: '1 lowercase letter (a–z)',       met: strength.checks.lowercase },
     { key: 'number',    label: '1 number (0–9)',                 met: strength.checks.number },
