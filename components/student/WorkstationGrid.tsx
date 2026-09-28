@@ -1,15 +1,16 @@
 'use client';
 import React, { useState } from 'react';
-import { Monitor, CheckCircle2, User, AlertTriangle, Cpu, HardDrive, Wifi, Sparkles, ArrowUpRight } from 'lucide-react';
+import { Monitor, CheckCircle2, User, AlertTriangle, Cpu, HardDrive, Wifi, Sparkles, ArrowUpRight, X } from 'lucide-react';
 import { LAB_ROOMS, type Workstation, type WorkstationStatus } from '@/lib/mockData';
 import { useWorkstations } from '@/context/WorkstationContext';
 
 interface WorkstationGridProps {
   onSelectStation?: (lab: string, pcNum: string) => void;
+  onPrefillTicket?: (lab: string, pcNum: string) => void;
   selectedStation?: { lab: string; pcNum: string } | null;
 }
 
-export default function WorkstationGrid({ onSelectStation, selectedStation }: WorkstationGridProps) {
+export default function WorkstationGrid({ onSelectStation, onPrefillTicket, selectedStation }: WorkstationGridProps) {
   const { workstations } = useWorkstations();
   const [selectedLab, setSelectedLab] = useState<string>('LAB-101');
   const [statusFilter, setStatusFilter] = useState<WorkstationStatus | 'ALL'>('ALL');
@@ -282,7 +283,17 @@ export default function WorkstationGrid({ onSelectStation, selectedStation }: Wo
                   <p className="text-xs text-slate-400 font-mono">{activeModalStation.ip}</p>
                 </div>
               </div>
-              <div>{getStatusBadge(activeModalStation.status)}</div>
+              <div className="flex items-center gap-2">
+                {getStatusBadge(activeModalStation.status)}
+                <button
+                  type="button"
+                  onClick={() => setActiveModalStation(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                  aria-label="Close station details"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
@@ -320,7 +331,9 @@ export default function WorkstationGrid({ onSelectStation, selectedStation }: Wo
               <button
                 type="button"
                 onClick={() => {
-                  if (onSelectStation) {
+                  if (onPrefillTicket) {
+                    onPrefillTicket(selectedLab, activeModalStation.id);
+                  } else if (onSelectStation) {
                     onSelectStation(selectedLab, activeModalStation.id);
                   }
                   setActiveModalStation(null);

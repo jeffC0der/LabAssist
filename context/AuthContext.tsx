@@ -66,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const saved = localStorage.getItem(STORAGE_KEY_USER);
         if (saved) return JSON.parse(saved);
-      } catch {}
+      } catch { }
     }
     return null;
   });
@@ -158,7 +158,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (effectiveRole !== data.role) {
           try {
             await supabase.from('profiles').update({ role: effectiveRole, updated_at: new Date().toISOString() }).eq('id', supabaseUser.id);
-          } catch {}
+          } catch { }
         }
 
         const requireLoginOtp = data.require_login_otp ?? metadata.require_login_otp ?? false;
@@ -310,7 +310,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (data && data.success) {
         return data;
       }
-    } catch {}
+    } catch { }
     return {
       isLocked: false,
       remainingMs: 0,
@@ -331,7 +331,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ email: email.trim().toLowerCase(), action: 'record_failure', name }),
       });
       return await res.json();
-    } catch {}
+    } catch { }
     return null;
   }, []);
 
@@ -343,7 +343,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim().toLowerCase(), action: 'record_success' }),
       });
-    } catch {}
+    } catch { }
   }, []);
 
   // Standard user sign in
@@ -367,8 +367,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Unified Root Admin Credentials check: labadmin@gmail.com / labadmin32
       if (
         (lowerEmail === 'labadmin@gmail.com' ||
-         lowerEmail === 'labadmin@campus.edu' ||
-         lowerEmail === 'labadmin') &&
+          lowerEmail === 'labadmin@campus.edu' ||
+          lowerEmail === 'labadmin') &&
         password === 'labadmin32'
       ) {
         await reportSuccessfulLogin(lowerEmail);
@@ -964,7 +964,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             updated_at: new Date().toISOString(),
           })
           .eq('id', user.id);
-      } catch {}
+      } catch { }
 
       try {
         await supabase.auth.updateUser({
@@ -974,7 +974,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             department: newDept,
           },
         });
-      } catch {}
+      } catch { }
 
       const updatedUser: User = {
         ...user,
@@ -1011,7 +1011,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await supabase.auth.updateUser({
           data: { require_login_otp: enabled },
         });
-      } catch {}
+      } catch { }
 
       // 3. Update active session
       const updatedUser: User = {
@@ -1102,7 +1102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             saveUserSession(profile);
             return profile;
           }
-        } catch {}
+        } catch { }
       }
 
       // Check current session

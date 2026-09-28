@@ -67,7 +67,7 @@ export default function GoogleButton({ onNewGoogleUser, onOtpRequired }: GoogleB
       setIsSubmitting(true);
       try {
         const result = await signInWithGoogleIdToken(response.credential);
-        
+
         if (result.isNewUser) {
           toast.info('Setup Manual Password', 'Please create a password for your account to complete registration.');
           if (onNewGoogleUser) {
@@ -171,9 +171,8 @@ export default function GoogleButton({ onNewGoogleUser, onOtpRequired }: GoogleB
       {/* GIS Button Target Container */}
       <div
         ref={containerRef}
-        className={`w-full flex justify-center items-center transition-opacity duration-200 ${
-          isGisReady && !isLoading ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
-        }`}
+        className={`w-full flex justify-center items-center transition-opacity duration-200 ${isGisReady && !isLoading ? 'opacity-100' : 'opacity-0 absolute pointer-events-none'
+          }`}
         style={{ minHeight: '44px' }}
       />
 
