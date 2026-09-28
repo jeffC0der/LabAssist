@@ -372,6 +372,195 @@ BEGIN
   END;
 END $$;
 
+-- ==============================================================================
+-- 14. DEVICE REPAIRS & INTAKE JOB CARDS TABLE
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.device_repairs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  rma_number TEXT UNIQUE NOT NULL,                       -- e.g. RMA-8921-UMAK
+  user_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+
+  -- 1. Client & Contact Profile
+  client_name TEXT NOT NULL,
+  client_email TEXT NOT NULL,
+  client_phone TEXT,
+  client_department TEXT DEFAULT 'Undergraduate Engineering',
+
+  -- 2. Device Metadata
+  device_type TEXT NOT NULL CHECK (device_type IN ('Laptop', 'Desktop', 'Other')) DEFAULT 'Laptop',
+  device_model TEXT NOT NULL,                           -- e.g. Lenovo Legion 5 15ARH05
+  serial_number TEXT NOT NULL,                          -- e.g. PF2X9Y8Z
+  os_specs TEXT,                                        -- e.g. Windows 11 Home | Ryzen 5 7535HS | 16GB RAM | RTX 3050
+  reported_issue TEXT NOT NULL,                         -- Primary owner complaint
+
+  -- 3. Physical & Pre-Diagnostic Intake Inspection (Dispute Protection)
+  inspection_scratches_dents BOOLEAN NOT NULL DEFAULT FALSE,
+  inspection_missing_screws_feet BOOLEAN NOT NULL DEFAULT FALSE,
+  inspection_screen_damage_dead_pixels BOOLEAN NOT NULL DEFAULT FALSE,
+  inspection_liquid_damage_indicators BOOLEAN NOT NULL DEFAULT FALSE,
+  additional_inspection_notes TEXT,                     -- Accompanying accessories & remarks
+
+  -- 4. Technician Workflow & Diagnostics
+  status TEXT NOT NULL CHECK (
+    status IN (
+      'RECEIVED',
+      'IN_DIAGNOSTICS',
+      'REPAIR_IN_PROGRESS',
+      'AWAITING_PARTS',
+      'READY_FOR_PICKUP',
+      'COMPLETED',
+      'CANCELLED'
+    )
+  ) DEFAULT 'RECEIVED',
+  priority TEXT NOT NULL CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH')) DEFAULT 'MEDIUM',
+  technician_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  technician_name TEXT,
+  technician_notes TEXT,
+  parts_replaced TEXT,
+  estimated_completion TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS on device_repairs
+ALTER TABLE public.device_repairs ENABLE ROW LEVEL SECURITY;
+
+-- Device Repairs Policies
+DROP POLICY IF EXISTS "Repairs are viewable by authenticated users" ON public.device_repairs;
+CREATE POLICY "Repairs are viewable by authenticated users"
+  ON public.device_repairs FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "Users can submit device repair intake" ON public.device_repairs;
+CREATE POLICY "Users can submit device repair intake"
+  ON public.device_repairs FOR INSERT
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Technicians and Admins can update repair job cards" ON public.device_repairs;
+CREATE POLICY "Technicians and Admins can update repair job cards"
+  ON public.device_repairs FOR UPDATE
+  USING (
+    (SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('TECHNICIAN', 'ADMIN')
+    OR auth.uid() = user_id
+  );
+
+-- Realtime replication for device_repairs
+DO $$
+BEGIN
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.device_repairs;
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+    WHEN others THEN NULL;
+  END;
+END $$;
+
+-- Seed Sample Device Repair Records
+INSERT INTO public.device_repairs (
+  rma_number,
+  client_name,
+  client_email,
+  device_type,
+  device_model,
+  serial_number,
+  os_specs,
+  reported_issue,
+  inspection_scratches_dents,
+  inspection_missing_screws_feet,
+  inspection_screen_damage_dead_pixels,
+  inspection_liquid_damage_indicators,
+  additional_inspection_notes,
+  status,
+  priority,
+  technician_name,
+  technician_notes,
+  parts_replaced
+)
+VALUES
+  (
+    '01-LP-2026-0928',
+    'Marcus Vance',
+    'marcus.vance@umak.edu.ph',
+    'Laptop',
+    'Lenovo Legion 5 15ARH05',
+    'PF2X9Y8Z',
+    'Windows 11 Home | Ryzen 5 7535HS | 16GB RAM | RTX 3050',
+    'Spilled coffee on keyboard and trackpad; spacebar sticky and no display output on external HDMI port.',
+    TRUE,
+    FALSE,
+    FALSE,
+    TRUE,
+    'Liquid residue visible near top-right palm rest. OEM 230W power brick included with unit.',
+    'IN_DIAGNOSTICS',
+    'HIGH',
+    'Tech. Alex Torres',
+    'Ultrasonic board wash completed for daughterboard. Testing HDMI IC solder pads under microscope.',
+    'Keyboard membrane assembly ordered (P/N: 5CB0Z21516)'
+  ),
+  (
+    '02-PC-2026-0928',
+    'Alyssa Gomez',
+    'alyssa.gomez@umak.edu.ph',
+    'Desktop',
+    'Dell OptiPlex 7080 Micro Tower',
+    'DL7080-99X4',
+    'Windows 11 Pro | Intel Core i7-10700 | 32GB RAM | 512GB NVMe SSD',
+    'Continuous 3 amber + 2 white power LED diagnostic code on boot. Fans spin up then immediately shut down.',
+    FALSE,
+    TRUE,
+    FALSE,
+    FALSE,
+    'Two rear chassis thumb screws missing. Internal dust buildup in CPU cooler.',
+    'REPAIR_IN_PROGRESS',
+    'MEDIUM',
+    'Tech. Alex Torres',
+    'Reseated DIMM slot 2. Re-applied Arctic MX-4 thermal paste. Testing 24hr MemTest86 run.',
+    'CMOS CR2032 battery replaced'
+  ),
+  (
+    '03-LP-2026-0928',
+    'Daniel Bautista',
+    'daniel.bautista@umak.edu.ph',
+    'Laptop',
+    'ASUS ROG Zephyrus G14 GA402RJ',
+    'G14-8841Z',
+    'Windows 11 Home | Ryzen 9 6900HS | 16GB DDR5 | Radeon RX 6700S',
+    'Overheating and thermal throttling under CAD workloads. CPU temps reach 96°C within 3 minutes of rendering.',
+    TRUE,
+    FALSE,
+    FALSE,
+    FALSE,
+    'Chassis rubber feet intact. Minor scuff on anodized top lid.',
+    'READY_FOR_PICKUP',
+    'LOW',
+    'Tech. Maria Santos',
+    'Liquid metal repasted on vapor chamber. Fan intake grills de-dusted. Stress test stable at 78°C under sustained load.',
+    'Thermal Grizzly Conductonaut liquid metal'
+  ),
+  (
+    '04-PC-2026-0928',
+    'Kristine Reyes',
+    'kristine.reyes@umak.edu.ph',
+    'Desktop',
+    'Custom Engineering Workstation (Fractal Node 202)',
+    'ENG-LAB-CUST-04',
+    'Ubuntu 22.04 LTS | Ryzen 7 5800X3D | 64GB ECC RAM | RTX 4070',
+    'GPU PCIe slot sagging caused intermittent PCIe x16 link disconnection, causing kernel panic during CUDA training.',
+    FALSE,
+    FALSE,
+    FALSE,
+    FALSE,
+    'Custom dual-slot GPU anti-sag bracket requested.',
+    'AWAITING_PARTS',
+    'HIGH',
+    'Tech. Alex Torres',
+    'PCIe slot pins inspected with endoscope. Sourcing heavy-duty PCIe riser and CNC aluminum support pillar.',
+    NULL
+  )
+ON CONFLICT (rma_number) DO NOTHING;
+
+
 
 
 

@@ -4,6 +4,7 @@ import WorkstationGrid from './WorkstationGrid';
 import TicketSubmissionForm from './TicketSubmissionForm';
 import MyTicketsTracker from './MyTicketsTracker';
 import HardwareLoanerCard from './HardwareLoanerCard';
+import RepairServiceCard from './RepairServiceCard';
 import { useTickets } from '@/context/TicketContext';
 import { useWorkstations } from '@/context/WorkstationContext';
 import {
@@ -18,9 +19,10 @@ import {
   AlertTriangle,
   Layers,
   ArrowUpRight,
+  Wrench,
 } from 'lucide-react';
 
-export type StudentNavTab = 'PC_STATION' | 'SUBMIT_TICKET' | 'HARDWARE_RENT';
+export type StudentNavTab = 'PC_STATION' | 'SUBMIT_TICKET' | 'HARDWARE_RENT' | 'REPAIR_SERVICE';
 
 interface TabConfig {
   id: StudentNavTab;
@@ -66,6 +68,18 @@ const NAV_TABS: TabConfig[] = [
     badge: () => (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
         Lockers
+      </span>
+    ),
+  },
+  {
+    id: 'REPAIR_SERVICE',
+    label: 'Repair Service',
+    sublabel: 'Device Intake & Diagnostic Profile',
+    icon: <Wrench size={18} />,
+    activeColor: 'from-violet-500/20 to-indigo-500/10 border-violet-500/40 text-violet-300',
+    badge: () => (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-violet-500/15 text-violet-400 border border-violet-500/30">
+        Intake
       </span>
     ),
   },
@@ -293,6 +307,13 @@ export default function StudentPortal() {
           {activeTab === 'HARDWARE_RENT' && (
             <section aria-label="Hardware Rent and Loaners" className="animate-fade-in">
               <HardwareLoanerCard />
+            </section>
+          )}
+
+          {/* TAB 4: Repair Service */}
+          {activeTab === 'REPAIR_SERVICE' && (
+            <section aria-label="Client Device Repair Service and Intake" className="animate-fade-in">
+              <RepairServiceCard />
             </section>
           )}
         </div>

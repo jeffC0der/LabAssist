@@ -1,18 +1,18 @@
 'use client';
 import React, { useState } from 'react';
 import { Cpu, Box, CheckCircle2, Clock, ShieldCheck, KeyRound, Sparkles, ArrowRight, Loader2 } from 'lucide-react';
-import { MOCK_LOANER_ITEMS, MOCK_LOANER_REQUESTS, LAB_ROOMS, type LoanerItem, type LoanerRequest } from '@/lib/mockData';
+import { LAB_ROOMS } from '@/lib/mockData';
 import { useToast } from '@/context/ToastContext';
+import { useLoaners } from '@/context/LoanerContext';
 
 export default function HardwareLoanerCard() {
   const toast = useToast();
-  const [items, setItems] = useState<LoanerItem[]>(MOCK_LOANER_ITEMS);
-  const [requests, setRequests] = useState<LoanerRequest[]>(MOCK_LOANER_REQUESTS);
+  const { items, requests, submitRequest } = useLoaners();
 
   // Form state
-  const [selectedItemId, setSelectedItemId] = useState<string>(MOCK_LOANER_ITEMS[0].id);
-  const [studentName, setStudentName] = useState<string>('Marcus Vance');
-  const [studentId, setStudentId] = useState<string>('2024-88912');
+  const [selectedItemId, setSelectedItemId] = useState<string>(items.length > 0 ? items[0].id : '');
+  const [studentName, setStudentName] = useState<string>('');
+  const [studentId, setStudentId] = useState<string>('');
   const [labRoom, setLabRoom] = useState<string>('LAB-101');
   const [duration, setDuration] = useState<string>('2 Hours (Class Lab)');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -29,33 +29,24 @@ export default function HardwareLoanerCard() {
     }
 
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 600));
 
-    // Generate random locker & PIN
-    const lockerLetters = ['A', 'B', 'C', 'D'];
-    const randomLocker = `LOCKER-${lockerLetters[Math.floor(Math.random() * lockerLetters.length)]}${Math.floor(1 + Math.random() * 6)}`;
-    const randomPin = Math.floor(1000 + Math.random() * 9000);
-
-    const newReq: LoanerRequest = {
-      id: `REQ-${Math.floor(8800 + Math.random() * 900)}`,
+    const result = await submitRequest({
       itemId: selectedItem.id,
       itemName: selectedItem.name,
       studentName: studentName.trim() || 'Student User',
       studentId: studentId.trim() || '2024-XXXXX',
       labRoom,
       duration,
-      requestedAt: 'Just now',
-      status: 'APPROVED',
-      lockerCode: `${randomLocker} · PIN ${randomPin}`,
-    };
+    });
 
-    // Update stock count
-    setItems(prev => prev.map(i => i.id === selectedItem.id ? { ...i, available: i.available - 1 } : i));
-    setRequests(prev => [newReq, ...prev]);
-
-    toast.success('Equipment Loan Approved!', `Assigned ${randomLocker} with temporary PIN ${randomPin}. Collect at Lab Assist Kiosk.`);
     setIsSubmitting(false);
-    setActiveTab('ACTIVE_LOANS');
+
+    if (result.success) {
+      toast.success('Equipment Loan Approved!', `Assigned locker with code ${result.lockerCode}. Collect at Lab Assist Kiosk.`);
+      setActiveTab('ACTIVE_LOANS');
+    } else {
+      toast.error('Request Failed', 'Could not process loan request. Please try again.');
+    }
   };
 
   return (
