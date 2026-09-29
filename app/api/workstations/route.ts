@@ -38,8 +38,27 @@ export async function GET() {
       .select('*')
       .order('pc_num', { ascending: true });
 
-    if (error || !data || data.length === 0) {
-      // Return default mock if DB not yet seeded
+    if (!data || data.length === 0) {
+      // Auto-seed workstations table from initial fleet definition
+      const allRows: any[] = [];
+      for (const [labCode, stations] of Object.entries(MOCK_WORKSTATIONS)) {
+        for (const s of stations) {
+          allRows.push({
+            lab_code: labCode,
+            pc_num: s.id,
+            status: s.status,
+            assigned_user: s.user || null,
+            ip_address: s.ip,
+            specs: s.specs,
+            active_issue: s.activeIssue || null,
+          });
+        }
+      }
+      try {
+        await supabase.from('workstations').upsert(allRows, { onConflict: 'lab_code,pc_num' });
+      } catch (seedErr) {
+        console.warn('Workstation auto-seed notice:', seedErr);
+      }
       return NextResponse.json({ workstations: MOCK_WORKSTATIONS });
     }
 

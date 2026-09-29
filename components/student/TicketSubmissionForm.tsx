@@ -1,7 +1,8 @@
 'use client';
-import React, { useState, useEffect } from 'react';
-import { Send, Monitor, Keyboard, Zap, Wifi, AlertCircle, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Send, Monitor, Keyboard, Zap, Wifi, AlertCircle, AlertTriangle, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
 import { useTickets } from '@/context/TicketContext';
+import { useWorkstations } from '@/context/WorkstationContext';
 import { useToast } from '@/context/ToastContext';
 import { LAB_ROOMS, type TicketCategory, type TicketKey, type Ticket } from '@/lib/mockData';
 
@@ -71,28 +72,91 @@ const PRESETS: Record<TicketCategory, string[]> = {
 };
 
 export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCreated }: TicketSubmissionFormProps) {
-  const { addTicket } = useTickets();
+  const { addTicket, tickets } = useTickets();
+  const { workstations } = useWorkstations();
   const toast = useToast();
 
   const [labRoom, setLabRoom] = useState<string>(initialLab || 'LAB-101');
-  const [pcNum, setPcNum] = useState<string>(initialPc || 'PC-07');
+  const [pcNum, setPcNum] = useState<string>(initialPc || 'PC-01');
   const [selectedKey, setSelectedKey] = useState<TicketKey>('A');
   const [description, setDescription] = useState<string>('');
   const [isUrgent, setIsUrgent] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [studentName, setStudentName] = useState<string>('Student Kiosk');
 
-  // Update fields if parent selection changes
+  const prevInitialLabRef = useRef(initialLab);
+  const prevInitialPcRef = useRef(initialPc);
+
+  // Clean alphanumeric sorting for lab options (e.g. LAB-101, LAB-102, LAB-103...)
+  const rawLabs = Object.keys(workstations).filter((k) => k !== 'All Labs');
+  const labList = rawLabs.length > 0 ? rawLabs : LAB_ROOMS.filter((r) => r !== 'All Labs');
+  const labOptions = [...labList].sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+  );
+
+  // Workstations for currently selected lab
+  const currentLabWorkstations = workstations[labRoom] || [];
+  const sortedPcs = [...currentLabWorkstations].sort((a, b) => {
+    const numA = parseInt(a.id.replace(/\D/g, ''), 10) || 0;
+    const numB = parseInt(b.id.replace(/\D/g, ''), 10) || 0;
+    return numA - numB;
+  });
+
+  // Only update lab when initialLab prop actually changes from parent
   useEffect(() => {
-    if (initialLab) setLabRoom(initialLab);
-    if (initialPc) setPcNum(initialPc);
-  }, [initialLab, initialPc]);
+    if (initialLab && initialLab !== prevInitialLabRef.current) {
+      prevInitialLabRef.current = initialLab;
+      setLabRoom(initialLab);
+    }
+  }, [initialLab]);
+
+  // Only update PC when initialPc prop actually changes from parent
+  useEffect(() => {
+    if (initialPc && initialPc !== prevInitialPcRef.current) {
+      prevInitialPcRef.current = initialPc;
+      setPcNum(initialPc);
+    }
+  }, [initialPc]);
+
+  // When available workstations change or load, ensure selected pcNum is valid
+  useEffect(() => {
+    if (sortedPcs.length > 0) {
+      setPcNum((curr) => {
+        const exists = sortedPcs.some((p) => p.id === curr);
+        return exists ? curr : sortedPcs[0].id;
+      });
+    }
+  }, [sortedPcs]);
+
+  const handleLabChange = (newLab: string) => {
+    setLabRoom(newLab);
+    const pcsInNewLab = workstations[newLab] || [];
+    if (pcsInNewLab.length > 0) {
+      const exists = pcsInNewLab.some((p) => p.id === pcNum);
+      if (!exists) {
+        setPcNum(pcsInNewLab[0].id);
+      }
+    }
+  };
 
   const selectedCategoryObj = CATEGORY_OPTIONS.find(c => c.key === selectedKey)!;
-  const labOptions = LAB_ROOMS.filter(r => r !== 'All Labs');
+
+  // Check if selected PC currently has an active unresolved ticket (PENDING or DISPATCHED)
+  const activeTicketForSelected = tickets.find(
+    (t) =>
+      t.lab_id === labRoom &&
+      t.pc_num === pcNum &&
+      (t.status === 'PENDING' || t.status === 'DISPATCHED')
+  );
+  const isSelectedStationUnderRepair = Boolean(activeTicketForSelected);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isSelectedStationUnderRepair) {
+      toast.error('Ticket Submission Blocked', `${pcNum} in ${labRoom} is already marked under active repair.`);
+      return;
+    }
 
     if (!description.trim()) {
       toast.warning('Description required', 'Please describe the fault symptoms for the IT technician.');
@@ -160,7 +224,7 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
             <select
               id="submit-lab-room"
               value={labRoom}
-              onChange={(e) => setLabRoom(e.target.value)}
+              onChange={(e) => handleLabChange(e.target.value)}
               className="w-full px-3 py-2 rounded-xl text-xs bg-slate-800/80 text-slate-200 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all cursor-pointer"
               required
             >
@@ -173,20 +237,64 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
           </div>
 
           <div>
-            <label htmlFor="submit-pc-num" className="block text-xs font-semibold text-slate-300 mb-1.5">
-              Workstation PC # <span className="text-indigo-400">*</span>
+            <label htmlFor="submit-pc-num" className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
+              <span>Workstation PC # <span className="text-indigo-400">*</span></span>
+              {sortedPcs.length > 0 && (
+                <span className="text-[10px] text-slate-500 font-mono font-normal">
+                  {sortedPcs.length} PCs registered
+                </span>
+              )}
             </label>
-            <input
+            <select
               id="submit-pc-num"
-              type="text"
               value={pcNum}
               onChange={(e) => setPcNum(e.target.value)}
-              placeholder="e.g. PC-07"
-              className="w-full px-3 py-2 rounded-xl text-xs font-mono bg-slate-800/80 text-slate-200 placeholder-slate-500 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all"
+              className="w-full px-3 py-2 rounded-xl text-xs font-mono bg-slate-800/80 text-slate-200 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all cursor-pointer"
               required
-            />
+            >
+              {sortedPcs.length > 0 ? (
+                sortedPcs.map((pc) => {
+                  const activeTicketForPc = tickets.find(
+                    (t) =>
+                      t.lab_id === labRoom &&
+                      t.pc_num === pc.id &&
+                      (t.status === 'PENDING' || t.status === 'DISPATCHED')
+                  );
+                  const isPcUnderRepair = Boolean(activeTicketForPc);
+                  const statusIndicator = isPcUnderRepair
+                    ? '⚠ (Under Repair - Blocked)'
+                    : pc.status === 'OCCUPIED'
+                    ? '● (Occupied)'
+                    : '✓ (Online)';
+                  return (
+                    <option key={pc.id} value={pc.id} className="bg-slate-900 text-slate-200">
+                      {pc.id} {statusIndicator}
+                    </option>
+                  );
+                })
+              ) : (
+                <option value={pcNum} className="bg-slate-900 text-slate-200">
+                  {pcNum || 'No PCs registered'}
+                </option>
+              )}
+            </select>
           </div>
         </div>
+
+        {/* Station Under Repair Warning Banner */}
+        {isSelectedStationUnderRepair && (
+          <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start gap-3 text-xs animate-fade-in">
+            <AlertTriangle size={17} className="text-rose-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-rose-200">
+                Workstation {pcNum} ({labRoom}) is already Under Active Repair
+              </p>
+              <p className="text-[11px] text-rose-300/80 mt-0.5 leading-relaxed">
+                An open ticket has already been dispatched to IT technicians for this station. Additional ticket submissions are blocked for this unit until repair has been completed.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Issue Category Radio Cards */}
         <div>
@@ -300,13 +408,22 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
         {/* Submit Button */}
         <button
           type="submit"
-          disabled={isSubmitting}
-          className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white text-xs font-bold shadow-glow-indigo transition-all duration-200 flex items-center justify-center gap-2 active:scale-[0.99] disabled:opacity-70 disabled:cursor-not-allowed"
+          disabled={isSubmitting || isSelectedStationUnderRepair}
+          className={`w-full py-3 px-4 rounded-xl text-xs font-bold transition-all duration-200 flex items-center justify-center gap-2 ${
+            isSelectedStationUnderRepair
+              ? 'bg-slate-800/80 border border-rose-500/30 text-rose-400 cursor-not-allowed opacity-85'
+              : 'bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white shadow-glow-indigo active:scale-[0.99] disabled:opacity-70 disabled:cursor-not-allowed'
+          }`}
         >
           {isSubmitting ? (
             <>
               <Loader2 size={16} className="animate-spin text-white" />
               <span>Transmitting IoT Dispatch Packet...</span>
+            </>
+          ) : isSelectedStationUnderRepair ? (
+            <>
+              <AlertCircle size={15} className="text-rose-400" />
+              <span>Cannot Submit — PC Already Under Active Repair</span>
             </>
           ) : (
             <>

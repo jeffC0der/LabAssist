@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Monitor, CheckCircle2, User, AlertTriangle, Cpu, HardDrive, Wifi, Sparkles, ArrowUpRight, X } from 'lucide-react';
 import { LAB_ROOMS, type Workstation, type WorkstationStatus } from '@/lib/mockData';
 import { useWorkstations } from '@/context/WorkstationContext';
+import { useTickets } from '@/context/TicketContext';
 
 interface WorkstationGridProps {
   onSelectStation?: (lab: string, pcNum: string) => void;
@@ -12,13 +13,44 @@ interface WorkstationGridProps {
 
 export default function WorkstationGrid({ onSelectStation, onPrefillTicket, selectedStation }: WorkstationGridProps) {
   const { workstations } = useWorkstations();
+  const { tickets } = useTickets();
   const [selectedLab, setSelectedLab] = useState<string>('LAB-101');
   const [statusFilter, setStatusFilter] = useState<WorkstationStatus | 'ALL'>('ALL');
   const [activeModalStation, setActiveModalStation] = useState<Workstation | null>(null);
 
-  // Available lab rooms excluding "All Labs"
-  const labOptions = LAB_ROOMS.filter(r => r !== 'All Labs');
-  const stations = workstations[selectedLab] || [];
+  // Available lab rooms excluding "All Labs", naturally sorted
+  const dbLabs = Object.keys(workstations).filter(k => k !== 'All Labs');
+  const labList = dbLabs.length > 0 ? dbLabs : LAB_ROOMS.filter(r => r !== 'All Labs');
+  const labOptions = [...labList].sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+  );
+
+  // Raw stations combined with active ticket telemetry
+  const rawStations = workstations[selectedLab] || [];
+  const stations: Workstation[] = rawStations.map((s) => {
+    const activeTicket = tickets.find(
+      (t) =>
+        t.lab_id === selectedLab &&
+        t.pc_num === s.id &&
+        (t.status === 'PENDING' || t.status === 'DISPATCHED')
+    );
+    if (activeTicket) {
+      return {
+        ...s,
+        status: 'UNDER_REPAIR' as WorkstationStatus,
+        activeIssue: s.activeIssue || `${activeTicket.category} issue (${activeTicket.ticket_id})`,
+      };
+    }
+    // If there is no active ticket for this station, ensure it is restored to ONLINE
+    if (s.status === 'UNDER_REPAIR') {
+      return {
+        ...s,
+        status: 'ONLINE' as WorkstationStatus,
+        activeIssue: undefined,
+      };
+    }
+    return s;
+  });
 
   const filteredStations = stations.filter(s => {
     if (statusFilter === 'ALL') return true;
@@ -328,21 +360,32 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
             </div>
 
             <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  if (onPrefillTicket) {
-                    onPrefillTicket(selectedLab, activeModalStation.id);
-                  } else if (onSelectStation) {
-                    onSelectStation(selectedLab, activeModalStation.id);
-                  }
-                  setActiveModalStation(null);
-                }}
-                className="flex-1 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-glow-indigo transition-all flex items-center justify-center gap-1.5"
-              >
-                <Sparkles size={14} />
-                Prefill Failure Ticket for {activeModalStation.id}
-              </button>
+              {activeModalStation.status === 'UNDER_REPAIR' ? (
+                <button
+                  type="button"
+                  disabled
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-slate-800/90 border border-rose-500/30 text-rose-300 text-xs font-semibold cursor-not-allowed opacity-85 flex items-center justify-center gap-1.5"
+                >
+                  <AlertTriangle size={14} className="text-rose-400" />
+                  Station Already Under Active Repair
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onPrefillTicket) {
+                      onPrefillTicket(selectedLab, activeModalStation.id);
+                    } else if (onSelectStation) {
+                      onSelectStation(selectedLab, activeModalStation.id);
+                    }
+                    setActiveModalStation(null);
+                  }}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-glow-indigo transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Sparkles size={14} />
+                  Prefill Failure Ticket for {activeModalStation.id}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setActiveModalStation(null)}

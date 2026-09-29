@@ -227,14 +227,31 @@ export default function StudentPortal() {
                   Station selected for rapid diagnosis and ticket pre-filling.
                 </p>
                 {activeTab !== 'SUBMIT_TICKET' && (
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('SUBMIT_TICKET')}
-                    className="w-full py-2 px-3 rounded-lg bg-indigo-600/80 hover:bg-indigo-600 text-white font-medium text-[11px] flex items-center justify-center gap-1.5 transition-all shadow-glow-indigo"
-                  >
-                    <Sparkles size={13} />
-                    Report Issue on {selectedStation.pcNum}
-                  </button>
+                  Boolean(
+                    workstations[selectedStation.lab]?.some(
+                      (s) => s.id === selectedStation.pcNum && s.status === 'UNDER_REPAIR'
+                    ) ||
+                    tickets.some(
+                      (t) =>
+                        t.lab_id === selectedStation.lab &&
+                        t.pc_num === selectedStation.pcNum &&
+                        (t.status === 'PENDING' || t.status === 'DISPATCHED')
+                    )
+                  ) ? (
+                    <div className="w-full py-2 px-3 rounded-lg bg-slate-800/90 border border-rose-500/30 text-rose-300 font-medium text-[11px] flex items-center justify-center gap-1.5 cursor-not-allowed">
+                      <AlertTriangle size={13} className="text-rose-400" />
+                      {selectedStation.pcNum} Under Active Repair
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('SUBMIT_TICKET')}
+                      className="w-full py-2 px-3 rounded-lg bg-indigo-600/80 hover:bg-indigo-600 text-white font-medium text-[11px] flex items-center justify-center gap-1.5 transition-all shadow-glow-indigo"
+                    >
+                      <Sparkles size={13} />
+                      Report Issue on {selectedStation.pcNum}
+                    </button>
+                  )
                 )}
               </div>
             ) : (

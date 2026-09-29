@@ -137,10 +137,13 @@ export const MOCK_TICKETS: Ticket[] = [
     category: 'POWER/UPS',
     key: 'C',
     timestamp: minsAgo(55),
-    status: 'PENDING',
+    status: 'RESOLVED',
     reporter: 'Student Kiosk',
     description: 'PC does not power on. Power button LED not lighting. Surge protector checked.',
     priority: 'HIGH',
+    assignee: 'Tech. Rivera',
+    resolvedAt: minsAgo(15),
+    notes: 'Power supply unit replaced (EVGA 600W). Diagnostics and power load tests passed.',
   },
   {
     ticket_id: 'TKT-2409',
@@ -280,15 +283,8 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
     const id = `PC-${num}`;
     let status: WorkstationStatus = 'ONLINE';
     let user: string | undefined = undefined;
-    let activeIssue: string | undefined = undefined;
 
-    if (i === 6) {
-      status = 'UNDER_REPAIR';
-      activeIssue = 'Monitor no signal (TKT-2401)';
-    } else if (i === 17) {
-      status = 'UNDER_REPAIR';
-      activeIssue = 'Power supply fault (TKT-2408)';
-    } else if ([1, 3, 4, 8, 11, 14, 19, 21].includes(i)) {
+    if ([1, 3, 4, 8, 11, 14, 19, 21].includes(i)) {
       status = 'OCCUPIED';
       user = `Student_${1000 + i}`;
     }
@@ -301,7 +297,6 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
       ip: `10.12.101.${10 + i}`,
       specs: 'Core i7-13700 · 32GB RAM · RTX 4070',
       lastPing: '2s ago',
-      activeIssue,
     };
   }),
   'LAB-102': Array.from({ length: 20 }, (_, i) => {
@@ -309,15 +304,10 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
     const id = `PC-${num}`;
     let status: WorkstationStatus = 'ONLINE';
     let user: string | undefined = undefined;
-    let activeIssue: string | undefined = undefined;
 
     if (i === 11) {
       status = 'OCCUPIED';
       user = 'Student_1012';
-      activeIssue = 'Network DHCP warning (TKT-2402)';
-    } else if (i === 18) {
-      status = 'UNDER_REPAIR';
-      activeIssue = 'Headphone jack broken (TKT-2411)';
     } else if ([0, 2, 5, 9, 13, 16].includes(i)) {
       status = 'OCCUPIED';
       user = `Student_${2000 + i}`;
@@ -331,7 +321,6 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
       ip: `10.12.102.${10 + i}`,
       specs: 'Core i5-12600 · 16GB RAM · GTX 1660',
       lastPing: '3s ago',
-      activeIssue,
     };
   }),
   'LAB-103': Array.from({ length: 18 }, (_, i) => {
@@ -339,12 +328,8 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
     const id = `PC-${num}`;
     let status: WorkstationStatus = 'ONLINE';
     let user: string | undefined = undefined;
-    let activeIssue: string | undefined = undefined;
 
-    if (i === 2) {
-      status = 'UNDER_REPAIR';
-      activeIssue = 'UPS beeping fault (TKT-2403)';
-    } else if ([1, 4, 7, 10, 15].includes(i)) {
+    if ([1, 4, 7, 10, 15].includes(i)) {
       status = 'OCCUPIED';
       user = `Student_${3000 + i}`;
     }
@@ -357,7 +342,6 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
       ip: `10.12.103.${10 + i}`,
       specs: 'Ryzen 7 5800X · 32GB RAM · RTX 3060',
       lastPing: '1s ago',
-      activeIssue,
     };
   }),
   'LAB-104': Array.from({ length: 24 }, (_, i) => {
@@ -365,12 +349,8 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
     const id = `PC-${num}`;
     let status: WorkstationStatus = 'ONLINE';
     let user: string | undefined = undefined;
-    let activeIssue: string | undefined = undefined;
 
-    if (i === 21) {
-      status = 'UNDER_REPAIR';
-      activeIssue = 'Mouse sensor glitch (TKT-2407)';
-    } else if ([3, 6, 8, 12, 17, 20].includes(i)) {
+    if ([3, 6, 8, 12, 17, 20].includes(i)) {
       status = 'OCCUPIED';
       user = `Student_${4000 + i}`;
     }
@@ -383,7 +363,6 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
       ip: `10.12.104.${10 + i}`,
       specs: 'Core i7-12700 · 32GB RAM · RTX 3070',
       lastPing: '4s ago',
-      activeIssue,
     };
   }),
   'LAB-105': Array.from({ length: 16 }, (_, i) => {
@@ -391,12 +370,10 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
     const id = `PC-${num}`;
     let status: WorkstationStatus = 'ONLINE';
     let user: string | undefined = undefined;
-    let activeIssue: string | undefined = undefined;
 
     if (i === 8) {
       status = 'OCCUPIED';
       user = 'Student_4009';
-      activeIssue = 'Screen tear glitch (TKT-2405)';
     } else if ([0, 2, 5, 7, 11].includes(i)) {
       status = 'OCCUPIED';
       user = `Student_${5000 + i}`;
@@ -410,7 +387,6 @@ export const MOCK_WORKSTATIONS: Record<string, Workstation[]> = {
       ip: `10.12.105.${10 + i}`,
       specs: 'Apple Mac Studio M2 Max · 64GB Unified',
       lastPing: '2s ago',
-      activeIssue,
     };
   }),
 };
