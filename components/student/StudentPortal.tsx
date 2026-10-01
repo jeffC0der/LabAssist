@@ -7,6 +7,7 @@ import HardwareLoanerCard from './HardwareLoanerCard';
 import RepairServiceCard from './RepairServiceCard';
 import { useTickets } from '@/context/TicketContext';
 import { useWorkstations } from '@/context/WorkstationContext';
+import { useAuth } from '@/context/AuthContext';
 import {
   Monitor,
   Ticket as TicketIcon,
@@ -94,11 +95,30 @@ export default function StudentPortal() {
 
   const { tickets } = useTickets();
   const { workstations } = useWorkstations();
+  const { user } = useAuth();
 
-  // Active tickets for badge
-  const activeTicketCount = tickets.filter(
-    (t) => t.status === 'PENDING' || t.status === 'DISPATCHED'
-  ).length;
+  const isPrivilegedUser = user?.role === 'TECHNICIAN' || user?.role === 'ADMIN';
+
+  // Active tickets for badge (filtered to user's tickets for student accounts)
+  const activeTicketCount = tickets.filter((t) => {
+    const isActive = t.status === 'PENDING' || t.status === 'DISPATCHED';
+    if (!isActive) return false;
+    if (isPrivilegedUser) return true;
+    if (!user) return false;
+
+    const userEmailNorm = (user.email || '').trim().toLowerCase();
+    const ticketEmailNorm = (t.userEmail || '').trim().toLowerCase();
+    const userNameNorm = (user.name || '').trim().toLowerCase();
+    const reporterNorm = (t.reporter || '').trim().toLowerCase();
+    const emailPrefixNorm = userEmailNorm.split('@')[0];
+
+    const matchesUserId = Boolean(user.id && t.userId && t.userId === user.id);
+    const matchesEmail = Boolean(userEmailNorm && ticketEmailNorm && userEmailNorm === ticketEmailNorm);
+    const matchesReporterName = Boolean(userNameNorm && reporterNorm && userNameNorm === reporterNorm);
+    const matchesReporterPrefix = Boolean(emailPrefixNorm && reporterNorm && emailPrefixNorm === reporterNorm);
+
+    return matchesUserId || matchesEmail || matchesReporterName || matchesReporterPrefix;
+  }).length;
 
   // Approximate online workstations across all labs
   const onlinePcCount = Object.values(workstations).reduce(

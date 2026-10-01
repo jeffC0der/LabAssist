@@ -4,6 +4,7 @@ import { Send, Monitor, Keyboard, Zap, Wifi, AlertCircle, AlertTriangle, CheckCi
 import { useTickets } from '@/context/TicketContext';
 import { useWorkstations } from '@/context/WorkstationContext';
 import { useToast } from '@/context/ToastContext';
+import { useAuth } from '@/context/AuthContext';
 import { LAB_ROOMS, type TicketCategory, type TicketKey, type Ticket } from '@/lib/mockData';
 
 interface TicketSubmissionFormProps {
@@ -74,6 +75,7 @@ const PRESETS: Record<TicketCategory, string[]> = {
 export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCreated }: TicketSubmissionFormProps) {
   const { addTicket, tickets } = useTickets();
   const { workstations } = useWorkstations();
+  const { user } = useAuth();
   const toast = useToast();
 
   const [labRoom, setLabRoom] = useState<string>(initialLab || 'LAB-101');
@@ -82,7 +84,15 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
   const [description, setDescription] = useState<string>('');
   const [isUrgent, setIsUrgent] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [studentName, setStudentName] = useState<string>('Student Kiosk');
+  const [studentName, setStudentName] = useState<string>(user?.name || user?.email?.split('@')[0] || 'Student Kiosk');
+
+  useEffect(() => {
+    if (user?.name) {
+      setStudentName(user.name);
+    } else if (user?.email) {
+      setStudentName(user.email.split('@')[0]);
+    }
+  }, [user]);
 
   const prevInitialLabRef = useRef(initialLab);
   const prevInitialPcRef = useRef(initialPc);
@@ -177,9 +187,11 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
       key: selectedKey,
       timestamp: new Date().toISOString(),
       status: 'PENDING',
-      reporter: studentName.trim() || 'Student Kiosk',
+      reporter: studentName.trim() || user?.name || user?.email?.split('@')[0] || 'Student Kiosk',
       description: description.trim(),
       priority: isUrgent ? 'HIGH' : 'MEDIUM',
+      userId: user?.id,
+      userEmail: user?.email,
     };
 
     addTicket(newTicket);

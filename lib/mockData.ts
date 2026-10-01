@@ -18,6 +18,8 @@ export interface Ticket {
   assignee?: string;
   resolvedAt?: string;
   notes?: string;
+  userId?: string;
+  userEmail?: string;
 }
 
 export const KEY_CATEGORY_MAP: Record<TicketKey, TicketCategory> = {

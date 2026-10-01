@@ -1,6 +1,17 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { sendRepairReceiptEmail } from '@/lib/emailService';
+import { sendRepairReceiptEmail, sendReadyForPickupEmail, sendFinalReceiptEmail } from '@/lib/emailService';
+import {
+  extractWorkflowMetadata,
+  packWorkflowMetadata,
+  getAllExtendedRepairs,
+  getExtendedRepair,
+  setExtendedRepair,
+  getInMemoryInvoice,
+} from '@/lib/repairStore';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -13,7 +24,7 @@ function getSupabaseAdmin() {
 }
 
 // ── Seed data for empty tables ──
-const SEED_REPAIRS = [
+const SEED_REPAIRS: any[] = [
   {
     rma_number: '01-LP-2026-0928',
     client_name: 'Marcus Vance',
@@ -96,13 +107,74 @@ const SEED_REPAIRS = [
   },
 ];
 
-// Convert DB row → frontend shape
+// Convert DB row → frontend/API shape with full workflow attributes
 function rowToRepair(row: any) {
+  const rma = row.rma_number || row.job_order_number || row.request_number || row.id;
+  const { cleanNotes, meta: dbMeta } = extractWorkflowMetadata(row.additional_inspection_notes);
+  const memExt = getExtendedRepair(rma);
+  const inMemoryInv = getInMemoryInvoice(rma);
+
+  const ext = {
+    ...dbMeta,
+    ...memExt,
+    evaluation: {
+      ...(dbMeta.evaluation || {}),
+      ...(memExt.evaluation || {}),
+    },
+    completion: {
+      ...(dbMeta.completion || {}),
+      ...(memExt.completion || {}),
+    },
+    cancellation: {
+      ...(dbMeta.cancellation || {}),
+      ...(memExt.cancellation || {}),
+    },
+    billing: {
+      ...(dbMeta.billing || {}),
+      ...(memExt.billing || {}),
+      ...(inMemoryInv
+        ? {
+          paymentTiming: inMemoryInv.paymentTiming,
+          paymentStatus: inMemoryInv.paymentStatus,
+          paymentMethod: inMemoryInv.paymentMethod,
+          totalAmount: Number(inMemoryInv.totalAmount || 0),
+          amountPaid: Number(inMemoryInv.amountPaid || 0),
+          onlinePaymentReference: inMemoryInv.onlinePaymentReference,
+          settlementDate: inMemoryInv.settlementDate,
+        }
+        : {}),
+    },
+  };
+
+  // Resolve status: prefer embedded workflow metadata status, otherwise fallback to DB column
+  let resolvedStatus = ext.status || row.status || row.request_status || 'RECEIVED';
+  if (row.status === 'CANCELLED' || row.status === 'COMPLETED' || row.status === 'READY_FOR_PICKUP') {
+    resolvedStatus = row.status;
+  }
+  const isConfirmed = !['RECEIVED', 'PENDING_EVALUATION', 'UNDER_EVALUATION', 'EVALUATED'].includes(resolvedStatus);
+
+  const defaultEvaluation = {
+    evaluatorId: row.evaluator_id || ext.evaluation?.evaluatorId || undefined,
+    technicianEvaluation:
+      row.technician_evaluation ||
+      ext.evaluation?.technicianEvaluation ||
+      (isConfirmed ? 'Initial intake evaluation completed. Approved for lab service.' : undefined),
+    repairFeasibility: row.repair_feasibility || ext.evaluation?.repairFeasibility || (isConfirmed ? 'FEASIBLE' : 'PENDING'),
+    partsAvailability: row.parts_availability || ext.evaluation?.partsAvailability || 'IN_STOCK',
+    confirmedDate: row.confirmed_date || ext.evaluation?.confirmedDate || undefined,
+    confirmedTime: row.confirmed_time || ext.evaluation?.confirmedTime || undefined,
+    confirmedLocation: row.confirmed_location || ext.evaluation?.confirmedLocation || undefined,
+    evaluatedAt: row.evaluated_at || ext.evaluation?.evaluatedAt || undefined,
+  };
+
   return {
-    id: row.rma_number,
-    jobOrderNo: row.rma_number,
+    id: rma,
+    jobOrderNo: rma,
+    requestNumber: row.request_number || rma,
     clientName: row.client_name,
     clientEmail: row.client_email,
+    clientPhone: row.client_phone || undefined,
+    clientDepartment: row.client_department || 'Undergraduate Engineering',
     deviceType: row.device_type,
     deviceModel: row.device_model,
     serialNumber: row.serial_number,
@@ -114,49 +186,78 @@ function rowToRepair(row: any) {
       screenDamageDeadPixels: row.inspection_screen_damage_dead_pixels ?? false,
       liquidDamageIndicators: row.inspection_liquid_damage_indicators ?? false,
     },
-    additionalInspectionNotes: row.additional_inspection_notes || '',
-    status: row.status,
-    priority: row.priority,
-    technicianAssigned: row.technician_name || undefined,
-    technicianNotes: row.technician_notes || undefined,
-    partsReplaced: row.parts_replaced || undefined,
+    additionalInspectionNotes: cleanNotes || '',
+    status: resolvedStatus,
+    priority: row.priority || ext.priority || 'MEDIUM',
+    technicianAssigned: row.technician_name || ext.technicianAssigned || undefined,
+    technicianId: row.technician_id || ext.technicianId || undefined,
+    technicianNotes: row.technician_notes || ext.technicianNotes || undefined,
+    partsReplaced: row.parts_replaced || ext.partsReplaced || undefined,
     intakeDate: row.created_at || new Date().toISOString(),
     estimatedCompletion: row.estimated_completion || undefined,
-    completedAt: row.completed_at || undefined,
+    readyAt: ext.readyAt || row.ready_at || undefined,
+    pickupLocation: ext.pickupLocation || row.pickup_location || ext.evaluation?.confirmedLocation || row.confirmed_location || undefined,
+    deviceReleasedTo: ext.deviceReleasedTo || ext.completion?.deviceReleasedTo || row.device_released_to || undefined,
+    completedAt: row.completed_at || ext.completedAt || ext.completion?.completedAt || undefined,
     userId: row.user_id || undefined,
+
+    // Evaluation Data
+    evaluation: {
+      ...defaultEvaluation,
+      ...(ext.evaluation || {}),
+      confirmedDate: (ext.evaluation?.confirmedDate && ext.evaluation.confirmedDate.trim()) || row.confirmed_date || defaultEvaluation.confirmedDate || undefined,
+      confirmedTime: (ext.evaluation?.confirmedTime && ext.evaluation.confirmedTime.trim()) || row.confirmed_time || defaultEvaluation.confirmedTime || undefined,
+      confirmedLocation: (ext.evaluation?.confirmedLocation && ext.evaluation.confirmedLocation.trim()) || row.confirmed_location || defaultEvaluation.confirmedLocation || undefined,
+    },
+
+    // Completion & Release Data
+    completion: {
+      deviceReleasedTo: ext.deviceReleasedTo || ext.completion?.deviceReleasedTo || row.device_released_to || undefined,
+      completedAt: row.completed_at || ext.completedAt || ext.completion?.completedAt || undefined,
+    },
+
+    // Cancellation Data
+    cancellation:
+      ext.cancellation && ext.cancellation.reason
+        ? ext.cancellation
+        : row.cancellation_reason
+          ? {
+            reason: row.cancellation_reason,
+            description: row.cancellation_description || undefined,
+            cancelledAt: row.cancelled_at || undefined,
+            cancelledBy: row.cancelled_by || undefined,
+          }
+          : undefined,
+
+    // Billing & Invoice Overview
+    billing: {
+      paymentTiming: ext.billing?.paymentTiming || row.payment_timing || 'PAY_AFTER_REPAIR',
+      paymentStatus: ext.billing?.paymentStatus || row.payment_status || 'UNPAID',
+      paymentMethod: ext.billing?.paymentMethod || row.payment_method || undefined,
+      totalAmount: Number(ext.billing?.totalAmount ?? row.total_amount ?? 0),
+      amountPaid: Number(ext.billing?.amountPaid ?? row.amount_paid ?? 0),
+      onlinePaymentReference: ext.billing?.onlinePaymentReference || row.online_payment_reference || undefined,
+      settlementDate: ext.billing?.settlementDate || row.settlement_date || undefined,
+    },
   };
 }
+
+const NO_CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+  Pragma: 'no-cache',
+  Expires: '0',
+};
 
 // ── GET: Fetch all device repair records ──
 export async function GET() {
   const supabase = getSupabaseAdmin();
   if (!supabase) {
-    return NextResponse.json({
-      repairs: SEED_REPAIRS.map((r) => ({
-        id: r.rma_number,
-        jobOrderNo: r.rma_number,
-        clientName: r.client_name,
-        clientEmail: r.client_email,
-        deviceType: r.device_type,
-        deviceModel: r.device_model,
-        serialNumber: r.serial_number,
-        osSpecs: r.os_specs,
-        reportedIssue: r.reported_issue,
-        inspectionNotes: {
-          scratchesDents: r.inspection_scratches_dents,
-          missingScrewsFeet: r.inspection_missing_screws_feet,
-          screenDamageDeadPixels: r.inspection_screen_damage_dead_pixels,
-          liquidDamageIndicators: r.inspection_liquid_damage_indicators,
-        },
-        additionalInspectionNotes: r.additional_inspection_notes,
-        status: r.status,
-        priority: r.priority,
-        technicianAssigned: r.technician_name,
-        technicianNotes: r.technician_notes,
-        partsReplaced: r.parts_replaced,
-        intakeDate: new Date().toISOString(),
-      }))
-    });
+    return NextResponse.json(
+      {
+        repairs: SEED_REPAIRS.map(rowToRepair),
+      },
+      { headers: NO_CACHE_HEADERS }
+    );
   }
 
   try {
@@ -167,7 +268,7 @@ export async function GET() {
 
     if (error) {
       console.warn('Supabase device_repairs query error:', error.message);
-      return NextResponse.json({ repairs: [] });
+      return NextResponse.json({ repairs: [] }, { headers: NO_CACHE_HEADERS });
     }
 
     // Auto-seed if empty
@@ -178,17 +279,23 @@ export async function GET() {
           .from('device_repairs')
           .select('*')
           .order('created_at', { ascending: false });
-        return NextResponse.json({ repairs: (seeded || []).map(rowToRepair) });
+        return NextResponse.json(
+          { repairs: (seeded || []).map(rowToRepair) },
+          { headers: NO_CACHE_HEADERS }
+        );
       } catch (seedErr) {
         console.warn('Failed to seed device_repairs:', seedErr);
-        return NextResponse.json({ repairs: [] });
+        return NextResponse.json({ repairs: [] }, { headers: NO_CACHE_HEADERS });
       }
     }
 
-    return NextResponse.json({ repairs: data.map(rowToRepair) });
+    return NextResponse.json(
+      { repairs: data.map(rowToRepair) },
+      { headers: NO_CACHE_HEADERS }
+    );
   } catch (err: any) {
     console.error('Error fetching repairs:', err);
-    return NextResponse.json({ repairs: [] });
+    return NextResponse.json({ repairs: [] }, { headers: NO_CACHE_HEADERS });
   }
 }
 
@@ -201,6 +308,8 @@ export async function POST(request: Request) {
     const {
       clientName,
       clientEmail,
+      clientPhone,
+      clientDepartment,
       deviceType,
       deviceModel,
       serialNumber,
@@ -209,6 +318,8 @@ export async function POST(request: Request) {
       inspectionNotes,
       additionalInspectionNotes,
       userId,
+      evaluation,
+      paymentTiming,
     } = body;
 
     if (!clientName || !clientEmail || !deviceModel || !reportedIssue) {
@@ -225,43 +336,106 @@ export async function POST(request: Request) {
     const monthDate = `${month}${day}`;
     const devCode = deviceType === 'Desktop' ? 'PC' : (deviceType === 'Laptop' ? 'LP' : 'PC');
 
-    // Determine queue number based on intake date on technician side
-    let queueNum = '01';
+    let maxQueue = 0;
+    const pattern = new RegExp(`^(\\d+)-[A-Za-z0-9]+-${year}-${monthDate}$`, 'i');
+    const existingRmas = new Set<string>();
+
     if (supabase) {
       try {
-        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-        const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
-        const { count } = await supabase
+        const { data: rows } = await supabase
           .from('device_repairs')
-          .select('*', { count: 'exact', head: true })
-          .gte('created_at', startOfDay)
-          .lte('created_at', endOfDay);
+          .select('rma_number');
 
-        const currentCount = (count || 0) + 1;
-        queueNum = String(currentCount).padStart(2, '0');
+        if (rows && Array.isArray(rows)) {
+          rows.forEach((r: any) => {
+            if (r?.rma_number) {
+              const rmaStr = String(r.rma_number).trim();
+              existingRmas.add(rmaStr.toLowerCase());
+              const match = rmaStr.match(pattern);
+              if (match && match[1]) {
+                const q = parseInt(match[1], 10);
+                if (!isNaN(q) && q > maxQueue) maxQueue = q;
+              }
+            }
+          });
+        }
       } catch (cntErr) {
         console.warn('Could not count daily repairs:', cntErr);
       }
     }
 
-    // Standard Job Order No format: 01-PC/LP-2026-0928
-    const jobOrderNo = `${queueNum}-${devCode}-${year}-${monthDate}`;
+    // Check extendedRepairStore cache
+    const allRepairs = getAllExtendedRepairs();
+    Object.keys(allRepairs).forEach((k) => {
+      const rmaStr = String(k).trim();
+      existingRmas.add(rmaStr.toLowerCase());
+      const match = rmaStr.match(pattern);
+      if (match && match[1]) {
+        const q = parseInt(match[1], 10);
+        if (!isNaN(q) && q > maxQueue) maxQueue = q;
+      }
+    });
 
-    const row = {
+    // Check seed repairs
+    SEED_REPAIRS.forEach((r) => {
+      if (r?.rma_number) {
+        const rmaStr = String(r.rma_number).trim();
+        existingRmas.add(rmaStr.toLowerCase());
+        const match = rmaStr.match(pattern);
+        if (match && match[1]) {
+          const q = parseInt(match[1], 10);
+          if (!isNaN(q) && q > maxQueue) maxQueue = q;
+        }
+      }
+    });
+
+    let nextQueue = maxQueue + 1;
+    let queueNum = String(nextQueue).padStart(2, '0');
+    let jobOrderNo = `${queueNum}-${devCode}-${year}-${monthDate}`;
+
+    // Guarantee collision freedom
+    while (existingRmas.has(jobOrderNo.toLowerCase())) {
+      nextQueue += 1;
+      queueNum = String(nextQueue).padStart(2, '0');
+      jobOrderNo = `${queueNum}-${devCode}-${year}-${monthDate}`;
+    }
+
+    // Store extended workflow attributes
+    const initialMeta = {
+      status: 'RECEIVED',
+      priority: 'MEDIUM' as const,
+      evaluation: evaluation || {
+        repairFeasibility: 'PENDING' as const,
+        partsAvailability: 'IN_STOCK' as const,
+      },
+      billing: {
+        paymentTiming: (paymentTiming as any) || 'PAY_AFTER_REPAIR',
+        paymentStatus: 'UNPAID' as const,
+        totalAmount: 0.00,
+        amountPaid: 0.00,
+      },
+    };
+
+    setExtendedRepair(jobOrderNo, initialMeta);
+
+    // Valid Supabase device_repairs columns only to prevent schema cache errors
+    const dbRow: any = {
       rma_number: jobOrderNo,
       user_id: userId || null,
-      client_name: clientName,
-      client_email: clientEmail,
+      client_name: clientName.trim(),
+      client_email: clientEmail.trim(),
+      client_phone: clientPhone || null,
+      client_department: clientDepartment || 'Undergraduate Engineering',
       device_type: deviceType || 'Laptop',
-      device_model: deviceModel,
-      serial_number: serialNumber || 'UNTAGGED-S/N',
-      os_specs: osSpecs || null,
-      reported_issue: reportedIssue,
+      device_model: deviceModel.trim(),
+      serial_number: serialNumber?.trim() || 'UNTAGGED-S/N',
+      os_specs: osSpecs?.trim() || null,
+      reported_issue: reportedIssue.trim(),
       inspection_scratches_dents: inspectionNotes?.scratchesDents ?? false,
       inspection_missing_screws_feet: inspectionNotes?.missingScrewsFeet ?? false,
       inspection_screen_damage_dead_pixels: inspectionNotes?.screenDamageDeadPixels ?? false,
       inspection_liquid_damage_indicators: inspectionNotes?.liquidDamageIndicators ?? false,
-      additional_inspection_notes: additionalInspectionNotes || null,
+      additional_inspection_notes: packWorkflowMetadata(additionalInspectionNotes?.trim(), initialMeta),
       status: 'RECEIVED',
       priority: 'MEDIUM',
     };
@@ -269,15 +443,20 @@ export async function POST(request: Request) {
     if (supabase) {
       const { error: insertErr } = await supabase
         .from('device_repairs')
-        .insert(row);
+        .insert(dbRow);
 
       if (insertErr) {
         console.error('Supabase device_repairs insert error:', insertErr);
         return NextResponse.json({ error: insertErr.message }, { status: 500 });
       }
+    } else {
+      SEED_REPAIRS.unshift({
+        ...dbRow,
+        created_at: now.toISOString(),
+      });
     }
 
-    // Format Confirmation Date: e.g. September 28, 2026 | 11:15 AM
+    // Format Confirmation Date
     const confirmationDate = now.toLocaleDateString('en-US', {
       month: 'long',
       day: 'numeric',
@@ -324,7 +503,7 @@ export async function POST(request: Request) {
       emailDispatched,
       jobOrderNo,
       confirmationDate,
-      repair: rowToRepair({ ...row, created_at: now.toISOString() }),
+      repair: rowToRepair({ ...dbRow, created_at: now.toISOString() }),
     });
   } catch (err: any) {
     console.error('Repair POST error:', err);
@@ -332,39 +511,344 @@ export async function POST(request: Request) {
   }
 }
 
-// ── PATCH: Update repair status, assign technician, add notes ──
+// ── PATCH: Update repair status, evaluation, billing, completion, or cancellation ──
 export async function PATCH(request: Request) {
   const supabase = getSupabaseAdmin();
 
   try {
     const body = await request.json();
-    const { rmaNumber, status, technicianName, technicianNotes, partsReplaced, priority } = body;
+    const {
+      rmaNumber,
+      status,
+      technicianName,
+      technicianId,
+      technicianNotes,
+      partsReplaced,
+      priority,
+      // Evaluation
+      technicianEvaluation,
+      repairFeasibility,
+      partsAvailability,
+      confirmedDate,
+      confirmedTime,
+      confirmedLocation,
+      evaluatorId,
+      // Completion
+      deviceReleasedTo,
+      completedAt,
+      // Cancellation
+      cancellationReason,
+      cancellationDescription,
+      cancelledAt,
+      cancelledBy,
+      // Billing & Invoices
+      paymentTiming,
+      paymentStatus,
+      paymentMethod,
+      totalAmount,
+      amountPaid,
+      onlinePaymentReference,
+      settlementDate,
+      // Pickup Workflow
+      pickupLocation,
+      readyAt,
+      clientEmail,
+      clientName,
+      deviceModel,
+      isAdmin,
+    } = body;
 
     if (!rmaNumber) {
       return NextResponse.json({ error: 'rmaNumber is required' }, { status: 400 });
     }
 
+    // ── Pre-fetch existing record to inspect current status & payment conditions ──
+    let existingRecord: any = null;
     if (supabase) {
-      const updates: any = { updated_at: new Date().toISOString() };
-      if (status !== undefined) updates.status = status;
-      if (technicianName !== undefined) updates.technician_name = technicianName;
-      if (technicianNotes !== undefined) updates.technician_notes = technicianNotes;
-      if (partsReplaced !== undefined) updates.parts_replaced = partsReplaced;
-      if (priority !== undefined) updates.priority = priority;
-      if (status === 'COMPLETED') updates.completed_at = new Date().toISOString();
-
-      const { error: updateErr } = await supabase
+      const { data: rec } = await supabase
         .from('device_repairs')
-        .update(updates)
-        .eq('rma_number', rmaNumber);
+        .select('*')
+        .eq('rma_number', rmaNumber)
+        .maybeSingle();
+      existingRecord = rec;
+    } else {
+      existingRecord = SEED_REPAIRS.find((r: any) => r.rma_number === rmaNumber);
+    }
 
-      if (updateErr) {
-        console.error('Supabase device_repairs update error:', updateErr);
-        return NextResponse.json({ error: updateErr.message }, { status: 500 });
+    const { cleanNotes, meta: existingDbMeta } = extractWorkflowMetadata(existingRecord?.additional_inspection_notes);
+    const existingMem = getExtendedRepair(rmaNumber);
+    const inMemoryInv = getInMemoryInvoice(rmaNumber);
+
+    const currentExt = {
+      ...existingDbMeta,
+      ...existingMem,
+      evaluation: {
+        ...(existingDbMeta.evaluation || {}),
+        ...(existingMem.evaluation || {}),
+      },
+      completion: {
+        ...(existingDbMeta.completion || {}),
+        ...(existingMem.completion || {}),
+      },
+      cancellation: {
+        ...(existingDbMeta.cancellation || {}),
+        ...(existingMem.cancellation || {}),
+      },
+      billing: {
+        ...(existingDbMeta.billing || {}),
+        ...(existingMem.billing || {}),
+        ...(inMemoryInv
+          ? {
+            paymentTiming: inMemoryInv.paymentTiming,
+            paymentStatus: inMemoryInv.paymentStatus,
+            paymentMethod: inMemoryInv.paymentMethod,
+            totalAmount: Number(inMemoryInv.totalAmount || 0),
+            amountPaid: Number(inMemoryInv.amountPaid || 0),
+            onlinePaymentReference: inMemoryInv.onlinePaymentReference,
+            settlementDate: inMemoryInv.settlementDate,
+          }
+          : {}),
+      },
+    };
+
+    const currentStatus = existingRecord?.status || currentExt.status || 'RECEIVED';
+    const resolvedStatus = status || currentStatus;
+
+    // Prevent further repair-status changes unless an administrator explicitly reopens the Job Order
+    if (currentStatus === 'COMPLETED' && status && status !== 'COMPLETED' && !isAdmin) {
+      return NextResponse.json(
+        { error: 'This Job Order is already Completed. Further repair-status changes are locked unless reopened by an administrator.' },
+        { status: 403 }
+      );
+    }
+
+    // ── Validation for Job Order Completion ──
+    if (status === 'COMPLETED') {
+      const recipient = (deviceReleasedTo || '').trim();
+      if (!recipient) {
+        return NextResponse.json(
+          { error: 'Device Released To recipient name is required to complete the Job Order.' },
+          { status: 400 }
+        );
+      }
+
+      // Check payment requirement
+      const billingTotal = Number(totalAmount || currentExt.billing?.totalAmount || existingRecord?.total_amount || 0);
+      const isPaid = (paymentStatus === 'PAID' || currentExt.billing?.paymentStatus === 'PAID') || billingTotal === 0;
+
+      if (!isPaid) {
+        return NextResponse.json(
+          { error: 'Payment requirements have not been settled for this Job Order. Please settle payment before completing.' },
+          { status: 400 }
+        );
       }
     }
 
-    return NextResponse.json({ success: true, rmaNumber, status });
+    let resolvedEmail = clientEmail || existingRecord?.client_email;
+    let resolvedClientName = clientName || existingRecord?.client_name;
+    let resolvedDeviceModel = deviceModel || existingRecord?.device_model;
+    let resolvedLocation = pickupLocation || confirmedLocation || currentExt.pickupLocation || 'Electronics Diagnostics & Repair Desk - Room 402';
+    let resolvedReadyAt = readyAt || currentExt.readyAt || new Date().toISOString();
+
+    // Build consolidated workflow metadata
+    const updatedExt = {
+      ...currentExt,
+      status: resolvedStatus,
+      technicianAssigned: technicianName !== undefined ? technicianName : currentExt.technicianAssigned,
+      technicianId: technicianId !== undefined ? technicianId : currentExt.technicianId,
+      technicianNotes: technicianNotes !== undefined ? technicianNotes : currentExt.technicianNotes,
+      partsReplaced: partsReplaced !== undefined ? partsReplaced : currentExt.partsReplaced,
+      readyAt: resolvedReadyAt,
+      pickupLocation: resolvedLocation,
+      deviceReleasedTo: deviceReleasedTo || currentExt.deviceReleasedTo,
+      completedAt: completedAt || (resolvedStatus === 'COMPLETED' ? new Date().toISOString() : currentExt.completedAt),
+      evaluation: {
+        ...(currentExt.evaluation || {}),
+        ...(technicianEvaluation !== undefined ? { technicianEvaluation } : {}),
+        ...(repairFeasibility !== undefined ? { repairFeasibility } : {}),
+        ...(partsAvailability !== undefined ? { partsAvailability } : {}),
+        ...(confirmedDate !== undefined ? { confirmedDate } : {}),
+        ...(confirmedTime !== undefined ? { confirmedTime } : {}),
+        ...(confirmedLocation !== undefined ? { confirmedLocation } : {}),
+        ...(evaluatorId !== undefined ? { evaluatorId } : {}),
+      },
+      cancellation: cancellationReason
+        ? {
+          reason: cancellationReason,
+          description: cancellationDescription,
+          cancelledAt: cancelledAt || new Date().toISOString(),
+          cancelledBy,
+        }
+        : currentExt.cancellation,
+      completion: deviceReleasedTo
+        ? {
+          deviceReleasedTo: deviceReleasedTo.trim(),
+          completedAt: completedAt || new Date().toISOString(),
+        }
+        : currentExt.completion,
+      billing: {
+        ...(currentExt.billing || {}),
+        ...(paymentTiming !== undefined ? { paymentTiming } : {}),
+        ...(paymentStatus !== undefined ? { paymentStatus } : {}),
+        ...(paymentMethod !== undefined ? { paymentMethod } : {}),
+        ...(totalAmount !== undefined ? { totalAmount: Number(totalAmount) } : {}),
+        ...(amountPaid !== undefined ? { amountPaid: Number(amountPaid) } : {}),
+        ...(onlinePaymentReference !== undefined ? { onlinePaymentReference } : {}),
+        ...(settlementDate !== undefined ? { settlementDate } : {}),
+      },
+    };
+
+    // Save to global cross-module store
+    setExtendedRepair(rmaNumber, updatedExt);
+
+    // Map application status to database-compatible status for Supabase check constraint
+    // (PostgreSQL check constraint permits: RECEIVED, IN_DIAGNOSTICS, REPAIR_IN_PROGRESS, AWAITING_PARTS, READY_FOR_PICKUP, COMPLETED, CANCELLED)
+    const mapStatusToDb = (st?: string): string | undefined => {
+      if (!st) return undefined;
+      if (st === 'CONFIRMED' || st === 'PENDING_EVALUATION' || st === 'UNDER_EVALUATION' || st === 'EVALUATED') {
+        return 'IN_DIAGNOSTICS';
+      }
+      return st;
+    };
+
+    if (supabase) {
+      // Update database row with safe columns and embedded workflow metadata
+      const dbUpdates: any = {
+        updated_at: new Date().toISOString(),
+        additional_inspection_notes: packWorkflowMetadata(cleanNotes, updatedExt),
+      };
+      if (status !== undefined) dbUpdates.status = mapStatusToDb(status);
+      if (technicianName !== undefined) dbUpdates.technician_name = technicianName;
+      if (technicianId !== undefined) dbUpdates.technician_id = technicianId;
+      if (technicianNotes !== undefined) dbUpdates.technician_notes = technicianNotes;
+      if (partsReplaced !== undefined) dbUpdates.parts_replaced = partsReplaced;
+      if (priority !== undefined) dbUpdates.priority = priority;
+      if (completedAt !== undefined) {
+        dbUpdates.completed_at = completedAt;
+      } else if (resolvedStatus === 'COMPLETED') {
+        dbUpdates.completed_at = new Date().toISOString();
+      }
+
+      const { error: updateErr } = await supabase
+        .from('device_repairs')
+        .update(dbUpdates)
+        .eq('rma_number', rmaNumber);
+
+      if (updateErr) {
+        console.warn('Supabase device_repairs update warning:', updateErr.message);
+      }
+    } else {
+      const found = SEED_REPAIRS.find((r: any) => r.rma_number === rmaNumber);
+      if (found) {
+        if (status !== undefined) found.status = resolvedStatus;
+        if (technicianNotes !== undefined) found.technician_notes = technicianNotes;
+        if (partsReplaced !== undefined) found.parts_replaced = partsReplaced;
+        if (deviceReleasedTo !== undefined) found.device_released_to = deviceReleasedTo.trim();
+        if (completedAt !== undefined) {
+          found.completed_at = completedAt;
+        } else if (resolvedStatus === 'COMPLETED') {
+          found.completed_at = new Date().toISOString();
+        }
+      }
+    }
+
+    // ── Dispatch Brevo Ready for Pickup Email Notification ──
+    let emailDispatched = false;
+    let emailMessageId: string | undefined = undefined;
+
+    if (status === 'READY_FOR_PICKUP') {
+      if (resolvedEmail && resolvedEmail.includes('@')) {
+        try {
+          const emailRes = await sendReadyForPickupEmail({
+            jobOrderId: rmaNumber,
+            device: resolvedDeviceModel || 'Hardware Unit',
+            clientName: resolvedClientName || 'UMak Student / Faculty',
+            clientEmail: resolvedEmail,
+            pickupLocation: resolvedLocation,
+            readyAt: resolvedReadyAt,
+          });
+
+          emailDispatched = emailRes.success;
+          emailMessageId = emailRes.messageId;
+          console.log(`[Repair PATCH] Ready for pickup email sent to ${resolvedEmail}, success=${emailRes.success}`);
+        } catch (emailErr) {
+          console.error('[Repair PATCH] Failed to dispatch Ready for Pickup email:', emailErr);
+        }
+      }
+    }
+
+    // ── Dispatch Brevo Final Receipt Email Notification ──
+    let finalReceiptEmailDispatched = false;
+    let finalReceiptEmailMessageId: string | undefined = undefined;
+
+    if (status === 'COMPLETED') {
+      const ext = getExtendedRepair(rmaNumber);
+      const actualInvoiceId = `INV-01-${rmaNumber.replace(/[^0-9]/g, '').slice(-8) || '2026'}`;
+      const actualSettlementDate = settlementDate || ext.billing?.settlementDate || new Date().toISOString();
+      const actualPaymentMethod = paymentMethod || ext.billing?.paymentMethod || 'CASH';
+      const actualOnlineReference = onlinePaymentReference || ext.billing?.onlinePaymentReference;
+      const actualTotalPaid = Number(amountPaid || ext.billing?.amountPaid || totalAmount || ext.billing?.totalAmount || 0);
+
+      let formattedSettlementDate = actualSettlementDate;
+      try {
+        const dateObj = new Date(actualSettlementDate);
+        if (!isNaN(dateObj.getTime())) {
+          formattedSettlementDate = dateObj.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          });
+        }
+      } catch (_) { }
+
+      const methodNormalized =
+        actualPaymentMethod.toUpperCase() === 'ONLINE' || !!actualOnlineReference
+          ? 'Online'
+          : 'Cash';
+
+      const releaseRecipientName = (
+        deviceReleasedTo ||
+        ext.deviceReleasedTo ||
+        resolvedClientName ||
+        'Authorized Recipient'
+      ).trim();
+
+      if (resolvedEmail && resolvedEmail.includes('@')) {
+        try {
+          const receiptRes = await sendFinalReceiptEmail({
+            invoiceId: actualInvoiceId,
+            jobOrderId: rmaNumber,
+            settlementDate: formattedSettlementDate,
+            paymentStatus: 'PAID IN FULL',
+            paymentMethod: methodNormalized,
+            onlineReference: actualOnlineReference || undefined,
+            totalPaid: actualTotalPaid,
+            deviceReleasedTo: releaseRecipientName,
+            clientEmail: resolvedEmail,
+            clientName: resolvedClientName,
+            deviceModel: resolvedDeviceModel,
+          });
+
+          finalReceiptEmailDispatched = receiptRes.success;
+          finalReceiptEmailMessageId = receiptRes.messageId;
+          console.log(`[Repair PATCH] Final receipt email sent to ${resolvedEmail}, success=${receiptRes.success}`);
+        } catch (receiptEmailErr) {
+          console.error('[Repair PATCH] Failed to dispatch Final Receipt email:', receiptEmailErr);
+        }
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      rmaNumber,
+      status,
+      readyAt: resolvedReadyAt,
+      pickupLocation: resolvedLocation,
+      emailDispatched,
+      emailMessageId,
+      finalReceiptEmailDispatched,
+      finalReceiptEmailMessageId,
+    });
   } catch (err: any) {
     console.error('Repair PATCH error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });

@@ -1,22 +1,41 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Cpu, Box, CheckCircle2, Clock, ShieldCheck, KeyRound, Sparkles, ArrowRight, Loader2 } from 'lucide-react';
 import { LAB_ROOMS } from '@/lib/mockData';
 import { useToast } from '@/context/ToastContext';
 import { useLoaners } from '@/context/LoanerContext';
+import { useAuth } from '@/context/AuthContext';
 
 export default function HardwareLoanerCard() {
   const toast = useToast();
   const { items, requests, submitRequest } = useLoaners();
+  const { user } = useAuth();
+
+  const isPrivilegedUser = user?.role === 'TECHNICIAN' || user?.role === 'ADMIN';
 
   // Form state
   const [selectedItemId, setSelectedItemId] = useState<string>(items.length > 0 ? items[0].id : '');
-  const [studentName, setStudentName] = useState<string>('');
+  const [studentName, setStudentName] = useState<string>(user?.name || user?.email?.split('@')[0] || '');
   const [studentId, setStudentId] = useState<string>('');
   const [labRoom, setLabRoom] = useState<string>('LAB-101');
   const [duration, setDuration] = useState<string>('2 Hours (Class Lab)');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'REQUEST' | 'ACTIVE_LOANS'>('REQUEST');
+
+  useEffect(() => {
+    if (user?.name) setStudentName(user.name);
+    else if (user?.email) setStudentName(user.email.split('@')[0]);
+  }, [user]);
+
+  // Filter requests exclusive to user account unless privileged
+  const userRequests = requests.filter((r) => {
+    if (isPrivilegedUser) return true;
+    if (!user) return false;
+    const userNameNorm = (user.name || '').trim().toLowerCase();
+    const studentNameNorm = (r.studentName || '').trim().toLowerCase();
+    const emailPrefix = (user.email || '').split('@')[0].toLowerCase();
+    return userNameNorm === studentNameNorm || emailPrefix === studentNameNorm;
+  });
 
   const selectedItem = items.find(i => i.id === selectedItemId);
   const labOptions = LAB_ROOMS.filter(r => r !== 'All Labs');
@@ -94,7 +113,7 @@ export default function HardwareLoanerCard() {
           >
             Active Loans
             <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-violet-500/30 text-violet-200">
-              {requests.length}
+              {userRequests.length}
             </span>
           </button>
         </div>
@@ -223,38 +242,46 @@ export default function HardwareLoanerCard() {
       ) : (
         /* Active Loans View */
         <div className="space-y-3">
-          {requests.map((req) => (
-            <div
-              key={req.id}
-              className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-            >
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-bold text-violet-400 bg-violet-500/10 px-2 py-0.5 rounded border border-violet-500/20">
-                    {req.id}
-                  </span>
-                  <span className="text-xs font-bold text-slate-200">{req.itemName}</span>
-                </div>
-                <div className="text-[11px] text-slate-400 flex items-center gap-3">
-                  <span>Student: <strong className="text-slate-300">{req.studentName}</strong></span>
-                  <span>Room: <strong className="text-slate-300">{req.labRoom}</strong></span>
-                  <span>Duration: <strong className="text-slate-300">{req.duration}</strong></span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 self-start sm:self-auto">
-                {req.lockerCode && (
-                  <div className="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-mono font-bold flex items-center gap-1.5 shadow-[0_0_10px_rgba(16,185,129,0.15)]">
-                    <KeyRound size={13} className="text-emerald-400" />
-                    {req.lockerCode}
-                  </div>
-                )}
-                <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-violet-500/20 text-violet-300 border border-violet-500/30">
-                  {req.status}
-                </span>
-              </div>
+          {userRequests.length === 0 ? (
+            <div className="text-center py-8 bg-slate-900/30 rounded-xl border border-slate-800/50">
+              <CheckCircle2 size={28} className="text-slate-600 mx-auto mb-2" />
+              <p className="text-xs font-semibold text-slate-400">No active equipment loans</p>
+              <p className="text-[11px] text-slate-500">Submit a loaner request to check out microcontrollers & dev kits</p>
             </div>
-          ))}
+          ) : (
+            userRequests.map((req) => (
+              <div
+                key={req.id}
+                className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-bold text-violet-400 bg-violet-500/10 px-2 py-0.5 rounded border border-violet-500/20">
+                      {req.id}
+                    </span>
+                    <span className="text-xs font-bold text-slate-200">{req.itemName}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-400 flex items-center gap-3">
+                    <span>Student: <strong className="text-slate-300">{req.studentName}</strong></span>
+                    <span>Room: <strong className="text-slate-300">{req.labRoom}</strong></span>
+                    <span>Duration: <strong className="text-slate-300">{req.duration}</strong></span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 self-start sm:self-auto">
+                  {req.lockerCode && (
+                    <div className="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-mono font-bold flex items-center gap-1.5 shadow-[0_0_10px_rgba(16,185,129,0.15)]">
+                      <KeyRound size={13} className="text-emerald-400" />
+                      {req.lockerCode}
+                    </div>
+                  )}
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-violet-500/20 text-violet-300 border border-violet-500/30">
+                    {req.status}
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       )}
     </div>

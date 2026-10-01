@@ -69,6 +69,21 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
           (payload) => {
             if (payload.eventType === 'INSERT') {
               const newRow: any = payload.new;
+              let cleanDescription = newRow.description || '';
+              let userId = newRow.user_id;
+              let userEmail = newRow.user_email;
+              const metaMatch = cleanDescription.match(/<!--LABASSIST_TKT_META:(.*?)-->/);
+              if (metaMatch) {
+                try {
+                  const meta = JSON.parse(metaMatch[1]);
+                  cleanDescription = cleanDescription.replace(/<!--LABASSIST_TKT_META:(.*?)-->/g, '').trim();
+                  if (!userId && meta.userId) userId = meta.userId;
+                  if (!userEmail && meta.userEmail) userEmail = meta.userEmail;
+                } catch {
+                  cleanDescription = cleanDescription.replace(/<!--LABASSIST_TKT_META:(.*?)-->/g, '').trim();
+                }
+              }
+
               const newTicket: Ticket = {
                 ticket_id: newRow.ticket_id,
                 lab_id: newRow.lab_id,
@@ -78,11 +93,13 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
                 timestamp: newRow.created_at || new Date().toISOString(),
                 status: newRow.status,
                 reporter: newRow.reporter,
-                description: newRow.description,
+                description: cleanDescription,
                 priority: newRow.priority,
                 assignee: newRow.assignee || undefined,
                 resolvedAt: newRow.resolved_at || undefined,
                 notes: newRow.notes || undefined,
+                userId: userId || undefined,
+                userEmail: userEmail || undefined,
               };
               setTickets((prev) => {
                 if (prev.some((t) => t.ticket_id === newTicket.ticket_id)) {

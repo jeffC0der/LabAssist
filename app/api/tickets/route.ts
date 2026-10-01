@@ -12,8 +12,24 @@ function getSupabaseAdmin() {
   });
 }
 
+function extractTicketMeta(rawDesc: string): { cleanDesc: string; userId?: string; userEmail?: string } {
+  if (!rawDesc) return { cleanDesc: '' };
+  const match = rawDesc.match(/<!--LABASSIST_TKT_META:(.*?)-->/);
+  if (match) {
+    try {
+      const meta = JSON.parse(match[1]);
+      const cleanDesc = rawDesc.replace(/<!--LABASSIST_TKT_META:(.*?)-->/g, '').trim();
+      return { cleanDesc, userId: meta.userId, userEmail: meta.userEmail };
+    } catch {
+      return { cleanDesc: rawDesc.replace(/<!--LABASSIST_TKT_META:(.*?)-->/g, '').trim() };
+    }
+  }
+  return { cleanDesc: rawDesc };
+}
+
 // Convert DB row to frontend Ticket interface
 function rowToTicket(row: any): Ticket {
+  const { cleanDesc, userId, userEmail } = extractTicketMeta(row.description || '');
   return {
     ticket_id: row.ticket_id,
     lab_id: row.lab_id,
@@ -23,16 +39,24 @@ function rowToTicket(row: any): Ticket {
     timestamp: row.created_at || new Date().toISOString(),
     status: row.status,
     reporter: row.reporter,
-    description: row.description,
+    description: cleanDesc,
     priority: row.priority,
     assignee: row.assignee || undefined,
     resolvedAt: row.resolved_at || undefined,
     notes: row.notes || undefined,
+    userId: userId || row.user_id || undefined,
+    userEmail: userEmail || row.user_email || undefined,
   };
 }
 
 // Convert frontend Ticket interface to DB row
 function ticketToRow(ticket: Ticket) {
+  let descriptionWithMeta = ticket.description;
+  if (ticket.userId || ticket.userEmail) {
+    const metaPayload = JSON.stringify({ userId: ticket.userId, userEmail: ticket.userEmail });
+    descriptionWithMeta = `${ticket.description.replace(/<!--LABASSIST_TKT_META:(.*?)-->/g, '').trim()}\n<!--LABASSIST_TKT_META:${metaPayload}-->`;
+  }
+
   return {
     ticket_id: ticket.ticket_id,
     lab_id: ticket.lab_id,
@@ -42,7 +66,7 @@ function ticketToRow(ticket: Ticket) {
     priority: ticket.priority,
     status: ticket.status,
     reporter: ticket.reporter,
-    description: ticket.description,
+    description: descriptionWithMeta,
     assignee: ticket.assignee || null,
     notes: ticket.notes || null,
     resolved_at: ticket.resolvedAt || null,

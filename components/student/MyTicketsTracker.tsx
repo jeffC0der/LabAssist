@@ -2,16 +2,38 @@
 import React, { useState } from 'react';
 import { Clock, CheckCircle, UserCheck, AlertCircle, ChevronDown, ChevronUp, RefreshCw, Sparkles, Monitor } from 'lucide-react';
 import { useTickets } from '@/context/TicketContext';
+import { useAuth } from '@/context/AuthContext';
 import { getCategoryColors, getStatusColors, formatTimestamp, formatFullTimestamp } from '@/lib/utils';
 import type { Ticket, TicketStatus } from '@/lib/mockData';
 
 export default function MyTicketsTracker() {
   const { tickets } = useTickets();
+  const { user } = useAuth();
   const [filter, setFilter] = useState<'ALL' | 'ACTIVE' | 'RESOLVED'>('ALL');
   const [expandedTicketId, setExpandedTicketId] = useState<string | null>(null);
 
+  const isPrivilegedUser = user?.role === 'TECHNICIAN' || user?.role === 'ADMIN';
+
+  // Filter tickets exclusively to the logged-in user account
+  const userTickets = tickets.filter((t) => {
+    if (isPrivilegedUser) return true;
+    if (!user) return false;
+    const userEmailNorm = (user.email || '').trim().toLowerCase();
+    const ticketEmailNorm = (t.userEmail || '').trim().toLowerCase();
+    const userNameNorm = (user.name || '').trim().toLowerCase();
+    const reporterNorm = (t.reporter || '').trim().toLowerCase();
+    const emailPrefixNorm = userEmailNorm.split('@')[0];
+
+    const matchesUserId = Boolean(user.id && t.userId && t.userId === user.id);
+    const matchesEmail = Boolean(userEmailNorm && ticketEmailNorm && userEmailNorm === ticketEmailNorm);
+    const matchesReporterName = Boolean(userNameNorm && reporterNorm && userNameNorm === reporterNorm);
+    const matchesReporterPrefix = Boolean(emailPrefixNorm && reporterNorm && emailPrefixNorm === reporterNorm);
+
+    return matchesUserId || matchesEmail || matchesReporterName || matchesReporterPrefix;
+  });
+
   // Take the most recent tickets
-  const displayTickets = tickets.filter(t => {
+  const displayTickets = userTickets.filter(t => {
     if (filter === 'ACTIVE') return t.status === 'PENDING' || t.status === 'DISPATCHED';
     if (filter === 'RESOLVED') return t.status === 'RESOLVED';
     return true;
@@ -219,7 +241,7 @@ export default function MyTicketsTracker() {
                     <div>
                       <span className="text-slate-500 font-semibold block mb-0.5">Problem Description:</span>
                       <p className="text-slate-200 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                        {ticket.description}
+                        {ticket.description.replace(/<!--LABASSIST_.*?-->/g, '').trim()}
                       </p>
                     </div>
 
