@@ -1128,7 +1128,77 @@ VALUES
 ON CONFLICT (rma_number) DO NOTHING;
 
 
+-- ==============================================================================
+-- 21. REPAIR PAYMENTS & REVENUE TRANSACTIONS TABLE
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.payments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  payment_number TEXT UNIQUE NOT NULL,                       -- e.g. PAY-2026-0001
+  invoice_id UUID REFERENCES public.invoices(id) ON DELETE SET NULL,
+  invoice_number TEXT,                                       -- e.g. INV-01-2026-0928
+  job_order_number TEXT,                                     -- e.g. 01-LP-2026-0928
+  client_name TEXT NOT NULL,
+  client_email TEXT,
+  technician_name TEXT DEFAULT 'Tech. Alex Torres',
+  technician_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  amount NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+  payment_method TEXT NOT NULL CHECK (payment_method IN ('CASH', 'ONLINE', 'GCASH', 'MAYA', 'BANK_TRANSFER')),
+  payment_status TEXT NOT NULL CHECK (payment_status IN ('PAID', 'UNPAID', 'PENDING', 'REFUNDED')) DEFAULT 'PAID',
+  reference_number TEXT,                                     -- GCash / Maya reference
+  notes TEXT,
+  payment_date TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
+ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Payments viewable by authenticated users" ON public.payments;
+CREATE POLICY "Payments viewable by authenticated users"
+  ON public.payments FOR SELECT
+  USING (true);
 
+DROP POLICY IF EXISTS "Techs and Admins can manage payments" ON public.payments;
+CREATE POLICY "Techs and Admins can manage payments"
+  ON public.payments FOR ALL
+  USING (
+    (SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('TECHNICIAN', 'ADMIN')
+    OR true
+  );
+
+CREATE INDEX IF NOT EXISTS idx_payments_status ON public.payments(payment_status);
+CREATE INDEX IF NOT EXISTS idx_payments_method ON public.payments(payment_method);
+CREATE INDEX IF NOT EXISTS idx_payments_tech ON public.payments(technician_name);
+CREATE INDEX IF NOT EXISTS idx_payments_date ON public.payments(payment_date);
+
+DO $$
+BEGIN
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.payments;
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+    WHEN others THEN NULL;
+  END;
+END $$;
+
+-- 22. Seed Payments Data for Revenue Analytics
+INSERT INTO public.payments (
+  payment_number, invoice_number, job_order_number, client_name, client_email,
+  technician_name, amount, payment_method, payment_status, reference_number, notes, payment_date
+)
+VALUES
+  ('PAY-2026-0101', 'INV-03-2026-0928', '03-LP-2026-0928', 'Daniel Bautista', 'daniel.bautista@umak.edu.ph', 'Tech. Maria Santos', 1200.00, 'GCASH', 'PAID', 'GC-20260928-9812450', 'Paid via GCash counter QR code', NOW() - INTERVAL '1 hour'),
+  ('PAY-2026-0102', 'INV-01-2026-0928', '01-LP-2026-0928', 'Marcus Vance', 'marcus.vance@umak.edu.ph', 'Tech. Alex Torres', 1850.00, 'GCASH', 'UNPAID', NULL, 'Pending membrane installation', NOW() - INTERVAL '4 hours'),
+  ('PAY-2026-0103', 'INV-02-2026-0928', '02-PC-2026-0928', 'Alyssa Gomez', 'alyssa.gomez@umak.edu.ph', 'Tech. Alex Torres', 650.00, 'CASH', 'UNPAID', NULL, 'Awaiting pickup settlement', NOW() - INTERVAL '6 hours'),
+  ('PAY-2026-0104', 'INV-08-2026-0927', '08-LP-2026-0927', 'Sophia Cruz', 'sophia.cruz@umak.edu.ph', 'Tech. Carlos Rivera', 2400.00, 'GCASH', 'PAID', 'GC-20260927-4481901', 'Screen replacement completed', NOW() - INTERVAL '1 day'),
+  ('PAY-2026-0105', 'INV-07-2026-0927', '07-PC-2026-0927', 'Elijah Soriano', 'elijah.s@umak.edu.ph', 'Tech. Maria Santos', 850.00, 'CASH', 'PAID', NULL, 'PSU recapping & fan replacement', NOW() - INTERVAL '1 day 3 hours'),
+  ('PAY-2026-0106', 'INV-06-2026-0926', '06-LP-2026-0926', 'Chloe Bernardo', 'chloe.b@umak.edu.ph', 'Tech. Samantha Lim', 1500.00, 'MAYA', 'PAID', 'MY-20260926-8812903', 'NVMe SSD upgrade 1TB + OS clone', NOW() - INTERVAL '2 days'),
+  ('PAY-2026-0107', 'INV-05-2026-0926', '05-PC-2026-0926', 'Joshua Tan', 'joshua.tan@umak.edu.ph', 'Tech. Alex Torres', 1100.00, 'CASH', 'PAID', NULL, 'GPU repasting & thermal pads', NOW() - INTERVAL '2 days 5 hours'),
+  ('PAY-2026-0108', 'INV-04-2026-0925', '04-LP-2026-0925', 'Hannah Dela Cruz', 'hannah.dc@umak.edu.ph', 'Tech. Carlos Rivera', 3200.00, 'GCASH', 'PAID', 'GC-20260925-1172934', 'Keyboard replacement & USB repair', NOW() - INTERVAL '3 days'),
+  ('PAY-2026-0109', 'INV-03-2026-0925', '03-PC-2026-0925', 'Gabriel Ramos', 'gabriel.r@umak.edu.ph', 'Tech. Maria Santos', 750.00, 'CASH', 'PAID', NULL, 'BIOS chip reflash & CMOS', NOW() - INTERVAL '3 days 4 hours'),
+  ('PAY-2026-0110', 'INV-02-2026-0924', '02-LP-2026-0924', 'Patricia Mendoza', 'patricia.m@umak.edu.ph', 'Tech. Samantha Lim', 2100.00, 'BANK_TRANSFER', 'PAID', 'UB-20260924-5519283', 'Battery pack replacement OEM', NOW() - INTERVAL '4 days'),
+  ('PAY-2026-0111', 'INV-01-2026-0924', '01-PC-2026-0924', 'Justin David', 'justin.d@umak.edu.ph', 'Tech. Alex Torres', 950.00, 'CASH', 'PAID', NULL, 'Thermal compound & dust de-oxidation', NOW() - INTERVAL '4 days 6 hours'),
+  ('PAY-2026-0112', 'INV-09-2026-0923', '09-LP-2026-0923', 'Andrea Nicole', 'andrea.n@umak.edu.ph', 'Tech. Carlos Rivera', 1750.00, 'GCASH', 'PAID', 'GC-20260923-9921002', 'DC jack re-soldering & hinge repair', NOW() - INTERVAL '5 days'),
+  ('PAY-2026-0113', 'INV-08-2026-0922', '08-PC-2026-0922', 'Kyle Angelo', 'kyle.a@umak.edu.ph', 'Tech. Maria Santos', 1300.00, 'CASH', 'PAID', NULL, 'RAM upgrade + diagnostic', NOW() - INTERVAL '6 days'),
+  ('PAY-2026-0114', 'INV-07-2026-0921', '07-LP-2026-0921', 'Beatrice Lim', 'beatrice.l@umak.edu.ph', 'Tech. Samantha Lim', 2800.00, 'GCASH', 'PAID', 'GC-20260921-3319024', 'Liquid damage trace repair', NOW() - INTERVAL '7 days')
+ON CONFLICT (payment_number) DO NOTHING;
 

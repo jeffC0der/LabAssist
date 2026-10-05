@@ -2,21 +2,26 @@
 import React, { useState } from 'react';
 import TelemetryFleetDiagnostics from './TelemetryFleetDiagnostics';
 import FailureAnalytics from './FailureAnalytics';
+import RevenueAnalytics from './RevenueAnalytics';
 import UserAccessControl from './UserAccessControl';
 import LabStationManager from './LabStationManager';
-import { Shield, Radio, BarChart3, Users, Layers, Sparkles } from 'lucide-react';
+import { Shield, Radio, BarChart3, DollarSign, Users, Layers, Sparkles } from 'lucide-react';
+import { useTickets } from '@/context/TicketContext';
 
-type AdminTab = 'FLEET' | 'ANALYTICS' | 'RBAC' | 'ROOMS';
-
-const ADMIN_TABS: Array<{ id: AdminTab; label: string; icon: React.ReactNode; badge?: string }> = [
-  { id: 'FLEET', label: 'ESP32 Fleet Telemetry', icon: <Radio size={15} />, badge: '6 Nodes Live' },
-  { id: 'ANALYTICS', label: 'Failure Analytics', icon: <BarChart3 size={15} /> },
-  { id: 'RBAC', label: 'User & Access Control', icon: <Users size={15} /> },
-  { id: 'ROOMS', label: 'Lab & Station Manager', icon: <Layers size={15} />, badge: '5 Labs' },
-];
+type AdminTab = 'FLEET' | 'ANALYTICS' | 'REVENUE' | 'RBAC' | 'ROOMS';
 
 export default function AdminConsole() {
+  const { tickets } = useTickets();
   const [activeTab, setActiveTab] = useState<AdminTab>('FLEET');
+
+  const adminTabs: Array<{ id: AdminTab; label: string; icon: React.ReactNode; badge?: string }> = [
+    { id: 'FLEET', label: 'ESP32 Fleet Telemetry', icon: <Radio size={15} />, badge: '6 Nodes Live' },
+    { id: 'ANALYTICS', label: 'Failure Analytics', icon: <BarChart3 size={15} />, badge: `${tickets.length} Incidents` },
+    { id: 'REVENUE', label: 'Revenue Analytics', icon: <DollarSign size={15} />, badge: 'Live Ledger' },
+    { id: 'RBAC', label: 'User & Access Control', icon: <Users size={15} />, badge: 'Live DB' },
+    { id: 'ROOMS', label: 'Lab & Station Manager', icon: <Layers size={15} />, badge: '5 Labs' },
+  ];
+
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -32,7 +37,7 @@ export default function AdminConsole() {
               Centralized Infrastructure & IoT Administration
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
-              Monitor remote ESP32 hardware clusters, audit campus failure metrics, provision technician access keys, and configure physical lab station topologies.
+              Monitor remote ESP32 hardware clusters, audit campus failure metrics, provision technician access keys, track repair revenue & income, and configure physical lab station topologies.
             </p>
           </div>
 
@@ -45,7 +50,7 @@ export default function AdminConsole() {
 
       {/* Admin Module Navigation Tabs */}
       <div className="flex flex-wrap items-center gap-2 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/80 backdrop-blur-md">
-        {ADMIN_TABS.map((tab) => {
+        {adminTabs.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
             <button
@@ -77,6 +82,7 @@ export default function AdminConsole() {
       <div className="transition-all duration-300">
         {activeTab === 'FLEET' && <TelemetryFleetDiagnostics />}
         {activeTab === 'ANALYTICS' && <FailureAnalytics />}
+        {activeTab === 'REVENUE' && <RevenueAnalytics />}
         {activeTab === 'RBAC' && <UserAccessControl />}
         {activeTab === 'ROOMS' && <LabStationManager />}
       </div>
