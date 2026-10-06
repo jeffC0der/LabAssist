@@ -17,8 +17,9 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacielo
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 function getSupabaseAdmin() {
-  if (!serviceRoleKey) return null;
-  return createClient(supabaseUrl, serviceRoleKey, {
+  const key = serviceRoleKey || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!key) return null;
+  return createClient(supabaseUrl, key, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }
