@@ -706,9 +706,7 @@ export async function PATCH(request: Request) {
     // (PostgreSQL check constraint permits: RECEIVED, IN_DIAGNOSTICS, REPAIR_IN_PROGRESS, AWAITING_PARTS, READY_FOR_PICKUP, COMPLETED, CANCELLED)
     const mapStatusToDb = (st?: string): string | undefined => {
       if (!st) return undefined;
-      if (st === 'CONFIRMED' || st === 'PENDING_EVALUATION' || st === 'UNDER_EVALUATION' || st === 'EVALUATED') {
-        return 'IN_DIAGNOSTICS';
-      }
+      if (st === 'UNDER_EVALUATION') return 'PENDING_EVALUATION';
       return st;
     };
 
@@ -736,7 +734,11 @@ export async function PATCH(request: Request) {
         .eq('rma_number', rmaNumber);
 
       if (updateErr) {
-        console.warn('Supabase device_repairs update warning:', updateErr.message);
+        console.error('[repairs PATCH] Supabase update failed:', updateErr.message);
+        return NextResponse.json(
+          { error: `Database update failed: ${updateErr.message}` },
+          { status: 500 }
+        );
       }
     } else {
       const found = SEED_REPAIRS.find((r: any) => r.rma_number === rmaNumber);
