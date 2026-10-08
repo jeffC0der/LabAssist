@@ -8,6 +8,7 @@ interface ViewDetailsModalProps {
   ticket: Ticket;
   onClose: () => void;
   onDispatch: () => void;
+  onConfirmRepair: () => void;
   onResolve: () => void;
 }
 
@@ -18,7 +19,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   'NET/SOFTWARE': <Wifi size={18} />,
 };
 
-export default function ViewDetailsModal({ ticket, onClose, onDispatch, onResolve }: ViewDetailsModalProps) {
+export default function ViewDetailsModal({ ticket, onClose, onDispatch, onConfirmRepair, onResolve }: ViewDetailsModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const catColors = getCategoryColors(ticket.category);
   const statusColors = getStatusColors(ticket.status);
@@ -74,7 +75,7 @@ export default function ViewDetailsModal({ ticket, onClose, onDispatch, onResolv
           <div className="flex flex-wrap gap-2">
             <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${statusColors.bg} ${statusColors.text} ${statusColors.border}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${statusColors.text.replace('text-', 'bg-')}`} aria-hidden="true" />
-              {ticket.status}
+              {ticket.status === 'UNDER_REPAIR' ? 'UNDER REPAIR' : ticket.status}
             </span>
             <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-700/50 border border-slate-600 ${priorityColors.text}`}>
               <AlertTriangle size={11} aria-hidden="true" />
@@ -145,25 +146,50 @@ export default function ViewDetailsModal({ ticket, onClose, onDispatch, onResolv
         {ticket.status !== 'RESOLVED' && (
           <div className="flex gap-3 px-6 pb-5">
             {ticket.status === 'PENDING' && (
+              <>
+                <button
+                  id={`modal-dispatch-${ticket.ticket_id}`}
+                  onClick={onDispatch}
+                  className="flex-1 py-2.5 rounded-xl btn-primary text-sm font-semibold flex items-center justify-center gap-2 shadow-glow-indigo"
+                  aria-label={`Dispatch technician for ${ticket.ticket_id}`}
+                >
+                  <User size={15} aria-hidden="true" />
+                  Dispatch Technician
+                </button>
+                <button
+                  id={`modal-resolve-quick-${ticket.ticket_id}`}
+                  onClick={onResolve}
+                  className="py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-xs font-semibold transition-colors"
+                  aria-label="Mark resolved directly"
+                >
+                  Quick Resolve
+                </button>
+              </>
+            )}
+
+            {ticket.status === 'DISPATCHED' && (
               <button
-                id={`modal-dispatch-${ticket.ticket_id}`}
-                onClick={onDispatch}
-                className="flex-1 py-2.5 rounded-xl btn-primary text-sm font-semibold flex items-center justify-center gap-2"
-                aria-label={`Dispatch technician for ${ticket.ticket_id}`}
+                id={`modal-confirm-repair-${ticket.ticket_id}`}
+                onClick={onConfirmRepair}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white text-sm font-bold flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(244,63,94,0.25)] transition-all"
+                aria-label={`Confirm repair for ${ticket.ticket_id}`}
               >
-                <User size={15} aria-hidden="true" />
-                Dispatch Technician
+                <AlertTriangle size={16} aria-hidden="true" />
+                Confirm Repair (Move to Red)
               </button>
             )}
-            <button
-              id={`modal-resolve-${ticket.ticket_id}`}
-              onClick={onResolve}
-              className="flex-1 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 text-sm font-semibold flex items-center justify-center gap-2 transition-all"
-              aria-label={`Mark ${ticket.ticket_id} as resolved`}
-            >
-              <CheckCircle size={15} aria-hidden="true" />
-              Mark Resolved
-            </button>
+
+            {ticket.status === 'UNDER_REPAIR' && (
+              <button
+                id={`modal-resolve-${ticket.ticket_id}`}
+                onClick={onResolve}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-sm font-bold flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.25)] transition-all"
+                aria-label={`Mark ${ticket.ticket_id} as resolved`}
+              >
+                <CheckCircle size={16} aria-hidden="true" />
+                Mark Resolved (Restore to Green)
+              </button>
+            )}
           </div>
         )}
       </div>

@@ -40,11 +40,12 @@ export function getCategoryColors(category: TicketCategory) {
 
 export function getStatusColors(status: TicketStatus) {
   const map: Record<TicketStatus, { bg: string; text: string; border: string }> = {
-    'PENDING':    { bg: 'bg-amber-500/15',   text: 'text-amber-400',   border: 'border-amber-500/30' },
-    'DISPATCHED': { bg: 'bg-blue-500/15',    text: 'text-blue-400',    border: 'border-blue-500/30' },
-    'RESOLVED':   { bg: 'bg-emerald-500/15', text: 'text-emerald-400', border: 'border-emerald-500/30' },
+    'PENDING':      { bg: 'bg-amber-500/15',   text: 'text-amber-400',   border: 'border-amber-500/30' },
+    'DISPATCHED':   { bg: 'bg-amber-500/15',   text: 'text-amber-300',   border: 'border-amber-500/40' },
+    'UNDER_REPAIR': { bg: 'bg-rose-500/15',    text: 'text-rose-400',    border: 'border-rose-500/30' },
+    'RESOLVED':     { bg: 'bg-emerald-500/15', text: 'text-emerald-400', border: 'border-emerald-500/30' },
   };
-  return map[status];
+  return map[status] || { bg: 'bg-slate-500/15', text: 'text-slate-400', border: 'border-slate-500/30' };
 }
 
 export function getPriorityColors(priority: Ticket['priority']) {

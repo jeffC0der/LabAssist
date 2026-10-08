@@ -5,23 +5,35 @@ import FailureAnalytics from './FailureAnalytics';
 import RevenueAnalytics from './RevenueAnalytics';
 import UserAccessControl from './UserAccessControl';
 import LabStationManager from './LabStationManager';
-import { Shield, Radio, BarChart3, DollarSign, Users, Layers, Sparkles } from 'lucide-react';
+import WorkstationGrid from '@/components/student/WorkstationGrid';
+import TicketTable from '@/components/dashboard/TicketTable';
+import MetricsBar from '@/components/dashboard/MetricsBar';
+import FilterBar from '@/components/dashboard/FilterBar';
+import { Shield, Radio, BarChart3, DollarSign, Users, Layers, Sparkles, ListOrdered, Monitor } from 'lucide-react';
 import { useTickets } from '@/context/TicketContext';
 
-type AdminTab = 'FLEET' | 'ANALYTICS' | 'REVENUE' | 'RBAC' | 'ROOMS';
+type AdminTab = 'DISPATCH' | 'FLEET' | 'ANALYTICS' | 'REVENUE' | 'RBAC' | 'ROOMS';
 
 export default function AdminConsole() {
   const { tickets } = useTickets();
-  const [activeTab, setActiveTab] = useState<AdminTab>('FLEET');
+  const [activeTab, setActiveTab] = useState<AdminTab>('DISPATCH');
+
+  const pendingCount = tickets.filter(t => t.status === 'PENDING').length;
+  const dispatchedCount = tickets.filter(t => t.status === 'DISPATCHED').length;
 
   const adminTabs: Array<{ id: AdminTab; label: string; icon: React.ReactNode; badge?: string }> = [
+    {
+      id: 'DISPATCH',
+      label: 'Live Dispatch & Workstations',
+      icon: <ListOrdered size={15} />,
+      badge: pendingCount > 0 ? `${pendingCount} Pending` : `${dispatchedCount} Dispatched`,
+    },
     { id: 'FLEET', label: 'ESP32 Fleet Telemetry', icon: <Radio size={15} />, badge: '6 Nodes Live' },
     { id: 'ANALYTICS', label: 'Failure Analytics', icon: <BarChart3 size={15} />, badge: `${tickets.length} Incidents` },
     { id: 'REVENUE', label: 'Revenue Analytics', icon: <DollarSign size={15} />, badge: 'Live Ledger' },
     { id: 'RBAC', label: 'User & Access Control', icon: <Users size={15} />, badge: 'Live DB' },
     { id: 'ROOMS', label: 'Lab & Station Manager', icon: <Layers size={15} />, badge: '5 Labs' },
   ];
-
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -37,7 +49,7 @@ export default function AdminConsole() {
               Centralized Infrastructure & IoT Administration
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
-              Monitor remote ESP32 hardware clusters, audit campus failure metrics, provision technician access keys, track repair revenue & income, and configure physical lab station topologies.
+              Monitor remote ESP32 hardware clusters, dispatch field technicians with live roster selection, audit campus failure metrics, provision access keys, and configure lab workstation topologies.
             </p>
           </div>
 
@@ -79,7 +91,22 @@ export default function AdminConsole() {
       </div>
 
       {/* Dynamic Tab Views */}
-      <div className="transition-all duration-300">
+      <div className="transition-all duration-300 space-y-6">
+        {activeTab === 'DISPATCH' && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Live Workstation Grid */}
+            <section aria-label="Campus Workstation Fleet">
+              <WorkstationGrid />
+            </section>
+
+            {/* Metrics & Filter Bar */}
+            <MetricsBar />
+            <FilterBar />
+
+            {/* Ticket Queue with Technician Dispatch & Repair Confirmation */}
+            <TicketTable />
+          </div>
+        )}
         {activeTab === 'FLEET' && <TelemetryFleetDiagnostics />}
         {activeTab === 'ANALYTICS' && <FailureAnalytics />}
         {activeTab === 'REVENUE' && <RevenueAnalytics />}

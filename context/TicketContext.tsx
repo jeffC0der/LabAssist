@@ -17,6 +17,7 @@ interface TicketContextValue {
   isLoading: boolean;
   setFilter: (key: keyof TicketFilters, value: string) => void;
   dispatch: (ticketId: string, assignee: string) => Promise<void>;
+  confirmRepair: (ticketId: string) => Promise<void>;
   resolve: (ticketId: string, notes?: string) => Promise<void>;
   addTicket: (ticket: Ticket) => Promise<void>;
   refreshTickets: () => Promise<void>;
@@ -84,6 +85,15 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
                 }
               }
 
+              let resolvedStatus: TicketStatus = newRow.status;
+              if (
+                newRow.notes === 'STATUS_OVERRIDE:UNDER_REPAIR' ||
+                newRow.notes === 'UNDER_REPAIR' ||
+                cleanDescription.includes('<!--LABASSIST_STATUS:UNDER_REPAIR-->')
+              ) {
+                resolvedStatus = 'UNDER_REPAIR';
+              }
+
               const newTicket: Ticket = {
                 ticket_id: newRow.ticket_id,
                 lab_id: newRow.lab_id,
@@ -91,13 +101,13 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
                 category: newRow.category,
                 key: newRow.key,
                 timestamp: newRow.created_at || new Date().toISOString(),
-                status: newRow.status,
+                status: resolvedStatus,
                 reporter: newRow.reporter,
-                description: cleanDescription,
+                description: cleanDescription.replace(/<!--LABASSIST_STATUS:UNDER_REPAIR-->/g, '').trim(),
                 priority: newRow.priority,
                 assignee: newRow.assignee || undefined,
                 resolvedAt: newRow.resolved_at || undefined,
-                notes: newRow.notes || undefined,
+                notes: newRow.notes === 'STATUS_OVERRIDE:UNDER_REPAIR' ? undefined : (newRow.notes || undefined),
                 userId: userId || undefined,
                 userEmail: userEmail || undefined,
               };
@@ -109,17 +119,28 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
               });
             } else if (payload.eventType === 'UPDATE') {
               const updatedRow: any = payload.new;
+              let resolvedStatus: TicketStatus = updatedRow.status;
+              if (
+                updatedRow.status !== 'RESOLVED' &&
+                (updatedRow.notes === 'STATUS_OVERRIDE:UNDER_REPAIR' ||
+                  updatedRow.notes === 'UNDER_REPAIR' ||
+                  updatedRow.description?.includes('<!--LABASSIST_STATUS:UNDER_REPAIR-->'))
+              ) {
+                resolvedStatus = 'UNDER_REPAIR';
+              }
+              const cleanNotes = (updatedRow.notes === 'STATUS_OVERRIDE:UNDER_REPAIR' || updatedRow.notes === 'UNDER_REPAIR') ? undefined : (updatedRow.notes || undefined);
+
               setTickets((prev) =>
                 prev.map((t) =>
                   t.ticket_id === updatedRow.ticket_id
                     ? {
-                        ...t,
-                        status: updatedRow.status,
-                        assignee: updatedRow.assignee || undefined,
-                        resolvedAt: updatedRow.resolved_at || undefined,
-                        notes: updatedRow.notes || undefined,
-                        priority: updatedRow.priority || t.priority,
-                      }
+                      ...t,
+                      status: resolvedStatus,
+                      assignee: updatedRow.assignee || undefined,
+                      resolvedAt: updatedRow.resolved_at || undefined,
+                      notes: cleanNotes,
+                      priority: updatedRow.priority || t.priority,
+                    }
                     : t
                 )
               );
@@ -144,7 +165,7 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const dispatch = useCallback(async (ticketId: string, assignee: string) => {
-    // 1. Optimistic local update
+    // 1. Optimistic local update (Ticket marked DISPATCHED, Station stays Yellow)
     setTickets((prev) =>
       prev.map((t) =>
         t.ticket_id === ticketId
@@ -165,10 +186,32 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const confirmRepair = useCallback(async (ticketId: string) => {
+    // 1. Optimistic local update (Ticket marked UNDER_REPAIR, Station becomes Red)
+    setTickets((prev) =>
+      prev.map((t) =>
+        t.ticket_id === ticketId
+          ? { ...t, status: 'UNDER_REPAIR' as TicketStatus }
+          : t
+      )
+    );
+
+    // 2. Persist to Supabase via backend API (sets workstation to UNDER_REPAIR)
+    try {
+      await fetch('/api/tickets', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticketId, status: 'UNDER_REPAIR' }),
+      });
+    } catch (err) {
+      console.error('Failed to confirm repair on server:', err);
+    }
+  }, []);
+
   const resolve = useCallback(async (ticketId: string, notes?: string) => {
     const resolvedAt = new Date().toISOString();
 
-    // 1. Optimistic local update
+    // 1. Optimistic local update (Ticket marked RESOLVED, Station becomes Green ONLINE)
     setTickets((prev) =>
       prev.map((t) =>
         t.ticket_id === ticketId
@@ -177,7 +220,7 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
       )
     );
 
-    // 2. Persist to Supabase via backend API (also resets workstation to ONLINE)
+    // 2. Persist to Supabase via backend API (resets workstation to ONLINE)
     try {
       await fetch('/api/tickets', {
         method: 'PATCH',
@@ -193,7 +236,7 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
     // 1. Optimistic local update
     setTickets((prev) => [ticket, ...prev]);
 
-    // 2. Persist to Supabase via backend API (also sets workstation to UNDER_REPAIR)
+    // 2. Persist to Supabase via backend API (sets workstation to ISSUE_REPORTED)
     try {
       await fetch('/api/tickets', {
         method: 'POST',
@@ -232,6 +275,7 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         setFilter,
         dispatch,
+        confirmRepair,
         resolve,
         addTicket,
         refreshTickets,

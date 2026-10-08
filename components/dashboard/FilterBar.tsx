@@ -13,10 +13,11 @@ const CATEGORIES = [
 ];
 
 const STATUSES = [
-  { value: 'ALL',        label: 'All Statuses' },
-  { value: 'PENDING',    label: 'Pending' },
-  { value: 'DISPATCHED', label: 'Dispatched' },
-  { value: 'RESOLVED',   label: 'Resolved' },
+  { value: 'ALL',          label: 'All Statuses' },
+  { value: 'PENDING',      label: 'Pending' },
+  { value: 'DISPATCHED',   label: 'Dispatched' },
+  { value: 'UNDER_REPAIR', label: 'Under Repair' },
+  { value: 'RESOLVED',     label: 'Resolved' },
 ];
 
 const selectClass = `

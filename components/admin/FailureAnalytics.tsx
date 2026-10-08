@@ -227,13 +227,13 @@ export default function FailureAnalytics() {
   const { fleetAvailabilityPct, fleetStatusDetail } = useMemo(() => {
     const allStations = Object.values(workstations).flat();
     const totalStations = allStations.length || 98;
-    const underRepairCount = allStations.filter((s) => s.status === 'UNDER_REPAIR').length;
-    const readyCount = totalStations - underRepairCount;
+    const faultyCount = allStations.filter((s) => s.status === 'UNDER_REPAIR' || s.status === 'ISSUE_REPORTED').length;
+    const readyCount = Math.max(0, totalStations - faultyCount);
     const pct = totalStations > 0 ? ((readyCount / totalStations) * 100).toFixed(1) : '100.0';
 
     return {
       fleetAvailabilityPct: `${pct}%`,
-      fleetStatusDetail: `${readyCount} of ${totalStations} workstations ready`,
+      fleetStatusDetail: `${readyCount} of ${totalStations} workstations operational`,
     };
   }, [workstations]);
 

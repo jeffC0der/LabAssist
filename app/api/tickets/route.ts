@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { MOCK_TICKETS, type Ticket } from '@/lib/mockData';
+import { MOCK_TICKETS, type Ticket, type TicketStatus } from '@/lib/mockData';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -31,6 +31,11 @@ function extractTicketMeta(rawDesc: string): { cleanDesc: string; userId?: strin
 // Convert DB row to frontend Ticket interface
 function rowToTicket(row: any): Ticket {
   const { cleanDesc, userId, userEmail } = extractTicketMeta(row.description || '');
+  let resolvedStatus: TicketStatus = row.status;
+  if (row.status !== 'RESOLVED' && (row.notes === 'STATUS_OVERRIDE:UNDER_REPAIR' || row.notes === 'UNDER_REPAIR' || row.description?.includes('<!--LABASSIST_STATUS:UNDER_REPAIR-->'))) {
+    resolvedStatus = 'UNDER_REPAIR';
+  }
+
   return {
     ticket_id: row.ticket_id,
     lab_id: row.lab_id,
@@ -38,13 +43,13 @@ function rowToTicket(row: any): Ticket {
     category: row.category,
     key: row.key,
     timestamp: row.created_at || new Date().toISOString(),
-    status: row.status,
+    status: resolvedStatus,
     reporter: row.reporter,
-    description: cleanDesc,
+    description: cleanDesc.replace(/<!--LABASSIST_STATUS:UNDER_REPAIR-->/g, '').trim(),
     priority: row.priority,
     assignee: row.assignee || undefined,
     resolvedAt: row.resolved_at || undefined,
-    notes: row.notes || undefined,
+    notes: (row.notes === 'STATUS_OVERRIDE:UNDER_REPAIR' || row.notes === 'UNDER_REPAIR') ? undefined : (row.notes || undefined),
     userId: userId || row.user_id || undefined,
     userEmail: userEmail || row.user_email || undefined,
   };
@@ -136,12 +141,12 @@ export async function POST(request: Request) {
         console.error('Supabase ticket insert error:', insertErr);
       }
 
-      // 2. Mark workstation as UNDER_REPAIR
+      // 2. Mark workstation as ISSUE_REPORTED (will become UNDER_REPAIR once dispatched)
       await supabase
         .from('workstations')
         .update({
-          status: 'UNDER_REPAIR',
-          active_issue: `${ticket.category} issue (${ticket.ticket_id})`,
+          status: 'ISSUE_REPORTED',
+          active_issue: `${ticket.category} issue reported (${ticket.ticket_id})`,
         })
         .match({ lab_code: ticket.lab_id, pc_num: ticket.pc_num });
     }
@@ -159,7 +164,7 @@ export async function PATCH(request: Request) {
 
   try {
     const body = await request.json();
-    const { ticketId, status, assignee, notes, resolvedAt } = body;
+    const { ticketId, status, assignee, notes, resolvedAt, labId, pcNum } = body;
 
     if (!ticketId || !status) {
       return NextResponse.json({ error: 'ticketId and status are required' }, { status: 400 });
@@ -168,30 +173,115 @@ export async function PATCH(request: Request) {
     if (supabase) {
       const updates: any = { status };
       if (assignee !== undefined) updates.assignee = assignee;
-      if (notes !== undefined) updates.notes = notes;
+      if (notes !== undefined) {
+        updates.notes = notes;
+      } else if (status === 'RESOLVED' || status === 'DISPATCHED') {
+        // Clear any previous STATUS_OVERRIDE
+        updates.notes = null;
+      }
       if (resolvedAt !== undefined) updates.resolved_at = resolvedAt;
       else if (status === 'RESOLVED') updates.resolved_at = new Date().toISOString();
 
-      const { data: updatedRows, error: updateErr } = await supabase
-        .from('tickets')
-        .update(updates)
-        .eq('ticket_id', ticketId)
-        .select('*');
+      let targetLab = labId;
+      let targetPc = pcNum;
+      let targetAssignee = assignee;
+      let targetCategory = 'Hardware';
 
-      if (updateErr) {
-        console.error('Supabase ticket update error:', updateErr);
+      // Pre-lookup ticket to get exact lab and PC
+      try {
+        const { data: existingTicket } = await supabase
+          .from('tickets')
+          .select('*')
+          .eq('ticket_id', ticketId)
+          .single();
+
+        if (existingTicket) {
+          targetLab = targetLab || existingTicket.lab_id;
+          targetPc = targetPc || existingTicket.pc_num;
+          targetAssignee = targetAssignee || existingTicket.assignee;
+          targetCategory = existingTicket.category || targetCategory;
+        }
+      } catch (e) {
+        console.warn('Ticket lookup notice:', e);
       }
 
-      // If resolved, update corresponding workstation back to ONLINE
-      if (status === 'RESOLVED' && updatedRows && updatedRows.length > 0) {
-        const row = updatedRows[0];
-        await supabase
-          .from('workstations')
-          .update({
-            status: 'ONLINE',
-            active_issue: null,
-          })
-          .match({ lab_code: row.lab_id, pc_num: row.pc_num });
+      // Try updating tickets table
+      try {
+        const { error: updateErr } = await supabase
+          .from('tickets')
+          .update(updates)
+          .eq('ticket_id', ticketId);
+
+        if (updateErr) {
+          if (updateErr.code === '23514' && status === 'UNDER_REPAIR') {
+            // Constraint in remote DB does not yet include UNDER_REPAIR: gracefully update notes override
+            console.warn('Notice: Remote tickets table check constraint does not yet include UNDER_REPAIR. Storing via fallback metadata.');
+            await supabase
+              .from('tickets')
+              .update({
+                status: 'DISPATCHED',
+                notes: 'STATUS_OVERRIDE:UNDER_REPAIR',
+                ...(assignee ? { assignee } : {}),
+              })
+              .eq('ticket_id', ticketId);
+          } else {
+            console.error('Supabase ticket update error:', updateErr);
+          }
+        }
+      } catch (err) {
+        console.error('Ticket update error:', err);
+      }
+
+      // ALWAYS update corresponding workstation in Supabase workstations table!
+      if (targetLab && targetPc) {
+        const techName = targetAssignee || 'Technician';
+        const numOnly = parseInt(targetPc.replace(/\D/g, ''), 10);
+        const paddedPc = !isNaN(numOnly) ? `PC-${numOnly.toString().padStart(2, '0')}` : targetPc;
+        const unpaddedPc = !isNaN(numOnly) ? `PC-${numOnly.toString()}` : targetPc;
+
+        if (status === 'DISPATCHED') {
+          await supabase
+            .from('workstations')
+            .update({
+              status: 'ISSUE_REPORTED',
+              active_issue: `${targetCategory} issue reported (${ticketId}) · Dispatched: ${techName}`,
+            })
+            .match({ lab_code: targetLab, pc_num: targetPc });
+          if (paddedPc !== targetPc) {
+            await supabase.from('workstations').update({ status: 'ISSUE_REPORTED' }).match({ lab_code: targetLab, pc_num: paddedPc });
+          }
+          if (unpaddedPc !== targetPc) {
+            await supabase.from('workstations').update({ status: 'ISSUE_REPORTED' }).match({ lab_code: targetLab, pc_num: unpaddedPc });
+          }
+        } else if (status === 'UNDER_REPAIR') {
+          await supabase
+            .from('workstations')
+            .update({
+              status: 'UNDER_REPAIR',
+              active_issue: `${targetCategory} repair confirmed in progress (${ticketId}) · ${techName}`,
+            })
+            .match({ lab_code: targetLab, pc_num: targetPc });
+          if (paddedPc !== targetPc) {
+            await supabase.from('workstations').update({ status: 'UNDER_REPAIR', active_issue: `${targetCategory} repair confirmed in progress (${ticketId}) · ${techName}` }).match({ lab_code: targetLab, pc_num: paddedPc });
+          }
+          if (unpaddedPc !== targetPc) {
+            await supabase.from('workstations').update({ status: 'UNDER_REPAIR', active_issue: `${targetCategory} repair confirmed in progress (${ticketId}) · ${techName}` }).match({ lab_code: targetLab, pc_num: unpaddedPc });
+          }
+        } else if (status === 'RESOLVED') {
+          await supabase
+            .from('workstations')
+            .update({
+              status: 'ONLINE',
+              active_issue: null,
+            })
+            .match({ lab_code: targetLab, pc_num: targetPc });
+          if (paddedPc !== targetPc) {
+            await supabase.from('workstations').update({ status: 'ONLINE', active_issue: null }).match({ lab_code: targetLab, pc_num: paddedPc });
+          }
+          if (unpaddedPc !== targetPc) {
+            await supabase.from('workstations').update({ status: 'ONLINE', active_issue: null }).match({ lab_code: targetLab, pc_num: unpaddedPc });
+          }
+        }
       }
     }
 

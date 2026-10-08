@@ -1,6 +1,6 @@
 // ─── Mock Data Library ───────────────────────────────────────────────────────
 
-export type TicketStatus = 'PENDING' | 'DISPATCHED' | 'RESOLVED';
+export type TicketStatus = 'PENDING' | 'DISPATCHED' | 'UNDER_REPAIR' | 'RESOLVED';
 export type TicketCategory = 'DISPLAY' | 'PERIPHERALS' | 'POWER/UPS' | 'NET/SOFTWARE';
 export type TicketKey = 'A' | 'B' | 'C' | 'D';
 
@@ -243,7 +243,7 @@ export function getKPIData(tickets: Ticket[]) {
 
 // ─── Student Portal Mock Data ──────────────────────────────────────────────────
 
-export type WorkstationStatus = 'ONLINE' | 'OCCUPIED' | 'UNDER_REPAIR';
+export type WorkstationStatus = 'ONLINE' | 'OCCUPIED' | 'ISSUE_REPORTED' | 'UNDER_REPAIR';
 
 export interface Workstation {
   id: string; // e.g. PC-01

@@ -246,23 +246,34 @@ export default function StudentPortal() {
                 <p className="text-slate-400 text-[11px]">
                   Station selected for rapid diagnosis and ticket pre-filling.
                 </p>
-                {activeTab !== 'SUBMIT_TICKET' && (
-                  Boolean(
-                    workstations[selectedStation.lab]?.some(
-                      (s) => s.id === selectedStation.pcNum && s.status === 'UNDER_REPAIR'
-                    ) ||
-                    tickets.some(
-                      (t) =>
-                        t.lab_id === selectedStation.lab &&
-                        t.pc_num === selectedStation.pcNum &&
-                        (t.status === 'PENDING' || t.status === 'DISPATCHED')
-                    )
-                  ) ? (
-                    <div className="w-full py-2 px-3 rounded-lg bg-slate-800/90 border border-rose-500/30 text-rose-300 font-medium text-[11px] flex items-center justify-center gap-1.5 cursor-not-allowed">
-                      <AlertTriangle size={13} className="text-rose-400" />
-                      {selectedStation.pcNum} Under Active Repair
-                    </div>
-                  ) : (
+                {activeTab !== 'SUBMIT_TICKET' && (() => {
+                  const activeTkt = tickets.find(
+                    (t) =>
+                      t.lab_id === selectedStation.lab &&
+                      t.pc_num === selectedStation.pcNum &&
+                      (t.status === 'PENDING' || t.status === 'DISPATCHED' || t.status === 'UNDER_REPAIR')
+                  );
+                  const isUnderRepair = activeTkt?.status === 'UNDER_REPAIR' || (!activeTkt && workstations[selectedStation.lab]?.some((s) => s.id === selectedStation.pcNum && s.status === 'UNDER_REPAIR'));
+                  const isReported = (activeTkt?.status === 'PENDING' || activeTkt?.status === 'DISPATCHED') || (!activeTkt && workstations[selectedStation.lab]?.some((s) => s.id === selectedStation.pcNum && s.status === 'ISSUE_REPORTED'));
+
+                  if (isUnderRepair) {
+                    return (
+                      <div className="w-full py-2 px-3 rounded-lg bg-slate-800/90 border border-rose-500/30 text-rose-300 font-medium text-[11px] flex items-center justify-center gap-1.5 cursor-not-allowed">
+                        <AlertTriangle size={13} className="text-rose-400" />
+                        {selectedStation.pcNum} Under Active Repair
+                      </div>
+                    );
+                  }
+                  if (isReported) {
+                    const isDispatched = activeTkt?.status === 'DISPATCHED';
+                    return (
+                      <div className="w-full py-2 px-3 rounded-lg bg-slate-800/90 border border-amber-500/30 text-amber-300 font-medium text-[11px] flex items-center justify-center gap-1.5 cursor-not-allowed">
+                        <AlertTriangle size={13} className="text-amber-400" />
+                        {selectedStation.pcNum} {isDispatched ? 'Technician Dispatched (Pending Confirmation)' : 'Issue Reported (Pending Dispatch)'}
+                      </div>
+                    );
+                  }
+                  return (
                     <button
                       type="button"
                       onClick={() => setActiveTab('SUBMIT_TICKET')}
@@ -271,8 +282,8 @@ export default function StudentPortal() {
                       <Sparkles size={13} />
                       Report Issue on {selectedStation.pcNum}
                     </button>
-                  )
-                )}
+                  );
+                })()}
               </div>
             ) : (
               <p className="text-slate-500 text-[11px]">

@@ -1,11 +1,12 @@
 'use client';
 import React, { useState } from 'react';
-import { Monitor, Keyboard, Zap, Wifi, User, CheckCircle, ExternalLink, Inbox } from 'lucide-react';
+import { Monitor, Keyboard, Zap, Wifi, User, CheckCircle, ExternalLink, Inbox, Wrench, Sparkles } from 'lucide-react';
 import { useTickets } from '@/context/TicketContext';
 import { useToast } from '@/context/ToastContext';
 import type { Ticket } from '@/lib/mockData';
 import { getCategoryColors, getStatusColors, getPriorityColors, formatTimestamp } from '@/lib/utils';
 import ViewDetailsModal from './ViewDetailsModal';
+import TechnicianDispatchModal from './TechnicianDispatchModal';
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   'DISPLAY':      <Monitor size={14} />,
@@ -14,30 +15,18 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   'NET/SOFTWARE': <Wifi size={14} />,
 };
 
-const TECHNICIANS = ['Tech. Rivera', 'Tech. Santos', 'Tech. Cruz', 'Tech. Lim', 'Tech. Garcia'];
+interface TicketRowProps {
+  ticket: Ticket;
+  onViewDetails: (t: Ticket) => void;
+  onOpenDispatchModal: (t: Ticket) => void;
+  onConfirmRepair: (t: Ticket) => void;
+  onResolveTicket: (t: Ticket) => void;
+}
 
-function TicketRow({ ticket, onViewDetails }: { ticket: Ticket; onViewDetails: (t: Ticket) => void }) {
-  const { dispatch, resolve } = useTickets();
-  const toast = useToast();
-
+function TicketRow({ ticket, onViewDetails, onOpenDispatchModal, onConfirmRepair, onResolveTicket }: TicketRowProps) {
   const catColors    = getCategoryColors(ticket.category);
   const statusColors = getStatusColors(ticket.status);
   const prioColors   = getPriorityColors(ticket.priority);
-
-  const handleDispatch = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (ticket.status !== 'PENDING') return;
-    const assignee = TECHNICIANS[Math.floor(Math.random() * TECHNICIANS.length)];
-    dispatch(ticket.ticket_id, assignee);
-    toast.success('Technician dispatched', `${assignee} assigned to ${ticket.ticket_id}`);
-  };
-
-  const handleResolve = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (ticket.status === 'RESOLVED') return;
-    resolve(ticket.ticket_id);
-    toast.success('Ticket resolved', `${ticket.ticket_id} marked as resolved.`);
-  };
 
   return (
     <tr
@@ -82,8 +71,8 @@ function TicketRow({ ticket, onViewDetails }: { ticket: Ticket; onViewDetails: (
       {/* Status */}
       <td className="px-4 py-3.5 whitespace-nowrap">
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${statusColors.bg} ${statusColors.text} ${statusColors.border}`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${statusColors.text.replace('text-', 'bg-')} ${ticket.status === 'PENDING' ? 'animate-pulse' : ''}`} aria-hidden="true" />
-          {ticket.status}
+          <span className={`w-1.5 h-1.5 rounded-full ${statusColors.text.replace('text-', 'bg-')} ${ticket.status === 'PENDING' || ticket.status === 'DISPATCHED' ? 'animate-pulse' : ''}`} aria-hidden="true" />
+          {ticket.status === 'UNDER_REPAIR' ? 'UNDER REPAIR' : ticket.status}
         </span>
       </td>
 
@@ -109,31 +98,68 @@ function TicketRow({ ticket, onViewDetails }: { ticket: Ticket; onViewDetails: (
       {/* Actions */}
       <td className="px-4 py-3.5 whitespace-nowrap" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-1.5">
+          {/* Stage 1: PENDING -> Dispatch button (Yellow station) */}
           {ticket.status === 'PENDING' && (
             <button
               id={`dispatch-${ticket.ticket_id}`}
-              onClick={handleDispatch}
-              className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-blue-500/15 text-blue-400 border border-blue-500/30 hover:bg-blue-500/25 hover:text-blue-300 transition-all whitespace-nowrap"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenDispatchModal(ticket);
+              }}
+              className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/25 hover:text-amber-200 transition-all whitespace-nowrap flex items-center gap-1.5 shadow-[0_0_10px_rgba(245,158,11,0.15)]"
               aria-label={`Dispatch technician for ${ticket.ticket_id}`}
             >
-              Dispatch
+              <Wrench size={12} className="text-amber-400" />
+              <span>Dispatch</span>
             </button>
           )}
-          {ticket.status !== 'RESOLVED' && (
+
+          {/* Stage 2: DISPATCHED -> Confirm Repair button (Changes station display to Red Under Repair) */}
+          {ticket.status === 'DISPATCHED' && (
+            <button
+              id={`confirm-repair-${ticket.ticket_id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onConfirmRepair(ticket);
+              }}
+              className="px-3 py-1.5 text-xs font-bold rounded-lg bg-rose-500/15 text-rose-300 border border-rose-500/40 hover:bg-rose-500/25 hover:text-rose-200 transition-all whitespace-nowrap flex items-center gap-1.5 shadow-[0_0_10px_rgba(244,63,94,0.15)]"
+              aria-label={`Confirm repair for ${ticket.ticket_id}`}
+              title="Click to confirm repair and mark station as Under Repair"
+            >
+              <Wrench size={13} className="text-rose-400" />
+              <span>Confirm Repair</span>
+            </button>
+          )}
+
+          {/* Stage 3: UNDER_REPAIR -> Mark Resolved button (Returns station to Green Online) */}
+          {ticket.status === 'UNDER_REPAIR' && (
             <button
               id={`resolve-${ticket.ticket_id}`}
-              onClick={handleResolve}
-              className="p-1.5 text-xs rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 hover:bg-emerald-500/20 transition-all"
+              onClick={(e) => {
+                e.stopPropagation();
+                onResolveTicket(ticket);
+              }}
+              className="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/25 hover:text-emerald-200 transition-all whitespace-nowrap flex items-center gap-1.5 shadow-[0_0_10px_rgba(16,185,129,0.15)]"
               aria-label={`Mark ${ticket.ticket_id} as resolved`}
-              title="Mark Resolved"
+              title="Click to resolve ticket and restore station to Online"
             >
-              <CheckCircle size={14} aria-hidden="true" />
+              <CheckCircle size={13} className="text-emerald-400" />
+              <span>Mark Resolved</span>
             </button>
           )}
+
+          {/* Stage 4: RESOLVED -> Completed pill */}
+          {ticket.status === 'RESOLVED' && (
+            <span className="px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-slate-800 text-slate-400 border border-slate-700/60 inline-flex items-center gap-1">
+              <CheckCircle size={11} className="text-emerald-500" />
+              Resolved
+            </span>
+          )}
+
           <button
             id={`view-${ticket.ticket_id}`}
             onClick={(e) => { e.stopPropagation(); onViewDetails(ticket); }}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-700 transition-all"
+            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-700 transition-all ml-1"
             aria-label={`View details for ${ticket.ticket_id}`}
             title="View Details"
           >
@@ -146,25 +172,41 @@ function TicketRow({ ticket, onViewDetails }: { ticket: Ticket; onViewDetails: (
 }
 
 export default function TicketTable() {
-  const { filteredTickets } = useTickets();
-  const { dispatch, resolve } = useTickets();
+  const { filteredTickets, dispatch, confirmRepair, resolve } = useTickets();
   const toast = useToast();
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [ticketToDispatch, setTicketToDispatch] = useState<Ticket | null>(null);
 
-  const TECHNICIANS_LIST = ['Tech. Rivera', 'Tech. Santos', 'Tech. Cruz', 'Tech. Lim', 'Tech. Garcia'];
+  const handleConfirmDispatch = async (ticketId: string, technicianName: string, dispatchNotes?: string) => {
+    await dispatch(ticketId, technicianName);
+    toast.success(
+      'Technician Dispatched',
+      `${technicianName} assigned to ${ticketId}. Action updated to "Confirm Repair".`
+    );
+    setTicketToDispatch(null);
+  };
 
-  const handleModalDispatch = () => {
-    if (!selectedTicket) return;
-    const assignee = TECHNICIANS_LIST[Math.floor(Math.random() * TECHNICIANS_LIST.length)];
-    dispatch(selectedTicket.ticket_id, assignee);
-    toast.success('Technician dispatched', `${assignee} assigned to ${selectedTicket.ticket_id}`);
+  const handleConfirmRepair = async (ticket: Ticket) => {
+    await confirmRepair(ticket.ticket_id);
+    toast.info(
+      'Repair Confirmed',
+      `${ticket.pc_num} (${ticket.lab_id}) is now marked Under Repair (Red).`
+    );
     setSelectedTicket(null);
   };
 
-  const handleModalResolve = () => {
+  const handleResolveTicket = async (ticket: Ticket) => {
+    await resolve(ticket.ticket_id);
+    toast.success(
+      'Ticket Resolved',
+      `${ticket.ticket_id} (${ticket.pc_num} in ${ticket.lab_id}) marked resolved and restored to Online (Green).`
+    );
+    setSelectedTicket(null);
+  };
+
+  const handleModalDispatchTrigger = () => {
     if (!selectedTicket) return;
-    resolve(selectedTicket.ticket_id);
-    toast.success('Ticket resolved', `${selectedTicket.ticket_id} has been marked as resolved.`);
+    setTicketToDispatch(selectedTicket);
     setSelectedTicket(null);
   };
 
@@ -174,8 +216,13 @@ export default function TicketTable() {
         {/* Table heading */}
         <div className="px-5 py-4 border-b border-slate-700/50 flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-bold text-slate-200">Ticket Queue</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Click any row to view full details</p>
+            <h2 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+              <span>Ticket Queue</span>
+              <span className="px-2 py-0.5 text-[10px] font-mono font-bold uppercase rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                Live Operations
+              </span>
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">Click any row to inspect symptoms or manage technician dispatching</p>
           </div>
           <div className="flex items-center gap-2">
             <span className="flex items-center gap-1.5 text-xs text-slate-500">
@@ -222,6 +269,9 @@ export default function TicketTable() {
                     key={ticket.ticket_id}
                     ticket={ticket}
                     onViewDetails={setSelectedTicket}
+                    onOpenDispatchModal={setTicketToDispatch}
+                    onConfirmRepair={handleConfirmRepair}
+                    onResolveTicket={handleResolveTicket}
                   />
                 ))}
               </tbody>
@@ -230,12 +280,24 @@ export default function TicketTable() {
         )}
       </div>
 
+      {/* Ticket Details Modal */}
       {selectedTicket && (
         <ViewDetailsModal
           ticket={selectedTicket}
           onClose={() => setSelectedTicket(null)}
-          onDispatch={handleModalDispatch}
-          onResolve={handleModalResolve}
+          onDispatch={handleModalDispatchTrigger}
+          onConfirmRepair={() => handleConfirmRepair(selectedTicket)}
+          onResolve={() => handleResolveTicket(selectedTicket)}
+        />
+      )}
+
+      {/* Technician Dispatch Selection Modal (Queried from Database) */}
+      {ticketToDispatch && (
+        <TechnicianDispatchModal
+          ticket={ticketToDispatch}
+          isOpen={Boolean(ticketToDispatch)}
+          onClose={() => setTicketToDispatch(null)}
+          onConfirmDispatch={handleConfirmDispatch}
         />
       )}
     </>

@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS public.workstations (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   pc_num TEXT NOT NULL, -- e.g. PC-01
   lab_code TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('ONLINE', 'OCCUPIED', 'UNDER_REPAIR')) DEFAULT 'ONLINE',
+  status TEXT NOT NULL CHECK (status IN ('ONLINE', 'OCCUPIED', 'ISSUE_REPORTED', 'UNDER_REPAIR')) DEFAULT 'ONLINE',
   assigned_user TEXT,
   ip_address TEXT,
   specs TEXT,
@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS public.tickets (
   category TEXT NOT NULL CHECK (category IN ('DISPLAY', 'PERIPHERALS', 'POWER/UPS', 'NET/SOFTWARE')),
   key TEXT NOT NULL CHECK (key IN ('A', 'B', 'C', 'D')),
   priority TEXT NOT NULL CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH')) DEFAULT 'MEDIUM',
-  status TEXT NOT NULL CHECK (status IN ('PENDING', 'DISPATCHED', 'RESOLVED')) DEFAULT 'PENDING',
+  status TEXT NOT NULL CHECK (status IN ('PENDING', 'DISPATCHED', 'UNDER_REPAIR', 'RESOLVED')) DEFAULT 'PENDING',
   reporter TEXT NOT NULL,
   reporter_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
   assignee TEXT,

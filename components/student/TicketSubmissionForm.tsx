@@ -151,12 +151,12 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
 
   const selectedCategoryObj = CATEGORY_OPTIONS.find(c => c.key === selectedKey)!;
 
-  // Check if selected PC currently has an active unresolved ticket (PENDING or DISPATCHED)
+  // Check if selected PC currently has an active unresolved ticket (PENDING, DISPATCHED, or UNDER_REPAIR)
   const activeTicketForSelected = tickets.find(
     (t) =>
       t.lab_id === labRoom &&
       t.pc_num === pcNum &&
-      (t.status === 'PENDING' || t.status === 'DISPATCHED')
+      (t.status === 'PENDING' || t.status === 'DISPATCHED' || t.status === 'UNDER_REPAIR')
   );
   const isSelectedStationUnderRepair = Boolean(activeTicketForSelected);
 
@@ -270,11 +270,14 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
                     (t) =>
                       t.lab_id === labRoom &&
                       t.pc_num === pc.id &&
-                      (t.status === 'PENDING' || t.status === 'DISPATCHED')
+                      (t.status === 'PENDING' || t.status === 'DISPATCHED' || t.status === 'UNDER_REPAIR')
                   );
-                  const isPcUnderRepair = Boolean(activeTicketForPc);
-                  const statusIndicator = isPcUnderRepair
-                    ? '⚠ (Under Repair - Blocked)'
+                  const isUnderRepair = activeTicketForPc?.status === 'UNDER_REPAIR';
+                  const isPendingOrDispatched = activeTicketForPc?.status === 'PENDING' || activeTicketForPc?.status === 'DISPATCHED';
+                  const statusIndicator = isUnderRepair
+                    ? '🛠 (Under Repair - Blocked)'
+                    : isPendingOrDispatched
+                    ? '⚠ (Issue Reported - Blocked)'
                     : pc.status === 'OCCUPIED'
                     ? '● (Occupied)'
                     : '✓ (Online)';
@@ -293,16 +296,44 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
           </div>
         </div>
 
-        {/* Station Under Repair Warning Banner */}
+        {/* Station Under Repair / Issue Reported Warning Banner */}
         {isSelectedStationUnderRepair && (
-          <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start gap-3 text-xs animate-fade-in">
-            <AlertTriangle size={17} className="text-rose-400 flex-shrink-0 mt-0.5" />
+          <div
+            className={`p-3.5 rounded-xl border flex items-start gap-3 text-xs animate-fade-in ${
+              activeTicketForSelected?.status === 'UNDER_REPAIR'
+                ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+            }`}
+          >
+            <AlertTriangle
+              size={17}
+              className={`flex-shrink-0 mt-0.5 ${
+                activeTicketForSelected?.status === 'UNDER_REPAIR' ? 'text-rose-400' : 'text-amber-400'
+              }`}
+            />
             <div>
-              <p className="font-bold text-rose-200">
-                Workstation {pcNum} ({labRoom}) is already Under Active Repair
+              <p
+                className={`font-bold ${
+                  activeTicketForSelected?.status === 'UNDER_REPAIR' ? 'text-rose-200' : 'text-amber-200'
+                }`}
+              >
+                Workstation {pcNum} ({labRoom}) is already{' '}
+                {activeTicketForSelected?.status === 'UNDER_REPAIR'
+                  ? 'Under Active Repair'
+                  : activeTicketForSelected?.status === 'DISPATCHED'
+                  ? 'Marked: Technician Dispatched (Awaiting Confirmation)'
+                  : 'Marked: Issue Reported'}
               </p>
-              <p className="text-[11px] text-rose-300/80 mt-0.5 leading-relaxed">
-                An open ticket has already been dispatched to IT technicians for this station. Additional ticket submissions are blocked for this unit until repair has been completed.
+              <p
+                className={`text-[11px] mt-0.5 leading-relaxed ${
+                  activeTicketForSelected?.status === 'UNDER_REPAIR' ? 'text-rose-300/80' : 'text-amber-300/80'
+                }`}
+              >
+                {activeTicketForSelected?.status === 'UNDER_REPAIR'
+                  ? 'A technician has confirmed active repair on this station. Additional ticket submissions are blocked until repair is completed.'
+                  : activeTicketForSelected?.status === 'DISPATCHED'
+                  ? 'A technician has been dispatched for this station and is arriving for repair. Additional submissions are queued.'
+                  : 'A fault report has already been logged for this station and is currently queued for technician dispatch.'}
               </p>
             </div>
           </div>
@@ -423,7 +454,9 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
           disabled={isSubmitting || isSelectedStationUnderRepair}
           className={`w-full py-3 px-4 rounded-xl text-xs font-bold transition-all duration-200 flex items-center justify-center gap-2 ${
             isSelectedStationUnderRepair
-              ? 'bg-slate-800/80 border border-rose-500/30 text-rose-400 cursor-not-allowed opacity-85'
+              ? activeTicketForSelected?.status === 'UNDER_REPAIR'
+                ? 'bg-slate-800/80 border border-rose-500/30 text-rose-400 cursor-not-allowed opacity-85'
+                : 'bg-slate-800/80 border border-amber-500/30 text-amber-400 cursor-not-allowed opacity-85'
               : 'bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white shadow-glow-indigo active:scale-[0.99] disabled:opacity-70 disabled:cursor-not-allowed'
           }`}
         >
@@ -434,8 +467,14 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
             </>
           ) : isSelectedStationUnderRepair ? (
             <>
-              <AlertCircle size={15} className="text-rose-400" />
-              <span>Cannot Submit — PC Already Under Active Repair</span>
+              <AlertCircle size={15} className={activeTicketForSelected?.status === 'UNDER_REPAIR' ? 'text-rose-400' : 'text-amber-400'} />
+              <span>
+                {activeTicketForSelected?.status === 'UNDER_REPAIR'
+                  ? 'Cannot Submit — PC Already Under Active Repair'
+                  : activeTicketForSelected?.status === 'DISPATCHED'
+                  ? 'Cannot Submit — Technician Already Dispatched'
+                  : 'Cannot Submit — Issue Already Reported'}
+              </span>
             </>
           ) : (
             <>
