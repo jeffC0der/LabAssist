@@ -1,7 +1,11 @@
 'use client';
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { isUmakEmail } from '@/lib/validators';
+import { installApiAuthFetch } from '@/lib/apiAuthFetch';
+
+// Every /api/ call from the browser carries the signed-in user's access token
+installApiAuthFetch();
 
 export type UserRole = 'STUDENT' | 'TECHNICIAN' | 'ADMIN';
 
@@ -94,45 +98,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Resolve effective role: check allowlist for TECHNICIAN, then DB record, then default
-  const resolveRole = async (email: string, fallbackRole: UserRole): Promise<UserRole> => {
-    const lowerEmail = (email || '').toLowerCase().trim();
-
-    // 1. Root admin email identification
-    if (
-      lowerEmail === 'labadmin@gmail.com' ||
-      lowerEmail === 'labadmin@campus.edu' ||
-      lowerEmail === 'labadmin' ||
-      lowerEmail === 'admin@campus.edu' ||
-      lowerEmail === 'labassist4umak@gmail.com'
-    ) {
-      return 'ADMIN';
-    }
-
-    // 2. Explicit technician identification
-    if (lowerEmail === 'umak.labassist@gmail.com') {
-      return 'TECHNICIAN';
-    }
-
-    // 3. Preserve existing verified ADMIN role from DB/session
-    if (fallbackRole === 'ADMIN') {
-      return 'ADMIN';
-    }
-
-    // 4. Check technician allowlist
-    try {
-      const { data: wl, error } = await supabase
-        .from('whitelisted_technicians')
-        .select('email')
-        .eq('email', lowerEmail)
-        .maybeSingle();
-      if (!error && wl) return 'TECHNICIAN';
-    } catch {
-      // Table may not exist yet — fall through
-    }
-
-    return fallbackRole || 'STUDENT';
-  };
+  // Proof of a verified password-reset OTP, required by /api/update-password
+  const resetTokenRef = useRef<string | null>(null);
 
   // Fetch or create profile in Supabase
   const fetchUserProfile = async (supabaseUser: any): Promise<User> => {
@@ -151,15 +118,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle();
 
       if (data && !error) {
-        // Re-resolve role via allowlist while preserving ADMIN if already assigned
-        const effectiveRole = await resolveRole(email, (data.role as UserRole) || 'STUDENT');
-
-        // Sync role back to DB if allowlist overrides stored role
-        if (effectiveRole !== data.role) {
-          try {
-            await supabase.from('profiles').update({ role: effectiveRole, updated_at: new Date().toISOString() }).eq('id', supabaseUser.id);
-          } catch { }
-        }
+        // The role is whatever the database says; it is only changed server-side (Admin Console / allowlist)
+        const effectiveRole = ((data.role as UserRole) || 'STUDENT');
 
         const requireLoginOtp = data.require_login_otp ?? metadata.require_login_otp ?? false;
 
@@ -186,7 +146,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle();
 
       if (userData && !userError) {
-        const effectiveRole = await resolveRole(email, (userData.role as UserRole) || 'STUDENT');
+        // Legacy users table: never trusted for roles (only profiles.role is authoritative)
+        const effectiveRole: UserRole = 'STUDENT';
         const requireLoginOtp = userData.require_login_otp ?? metadata.require_login_otp ?? false;
         return {
           id: userData.id,
@@ -234,12 +195,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (session?.user && isMounted) {
           const userProfile = await fetchUserProfile(session.user);
           saveUserSession(userProfile);
-        } else if (typeof window !== 'undefined') {
-          // Check if root admin or guest session was stored
-          const savedUser = localStorage.getItem(STORAGE_KEY_USER);
-          if (savedUser && isMounted) {
-            setUser(JSON.parse(savedUser));
-          }
+        } else if (isMounted) {
+          // A login is only valid with a real Supabase session; drop any stale/edited local copy
+          saveUserSession(null);
         }
       } catch {
         // Fallback
@@ -322,132 +280,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Helper to report failed login attempt to server
-  const reportFailedAttempt = useCallback(async (email: string, name?: string): Promise<any> => {
-    try {
-      const res = await fetch('/api/auth/lockout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase(), action: 'record_failure', name }),
-      });
-      return await res.json();
-    } catch { }
-    return null;
-  }, []);
+  // Password sign-in runs on the server (/api/auth/signin), which enforces the lockout and counts
+  // failures from real password checks; the returned Supabase session is then installed here.
+  const passwordSignIn = useCallback(async (email: string, password: string) => {
+    const res = await fetch('/api/auth/signin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+    });
+    const data = await res.json().catch(() => ({}));
 
-  // Helper to reset lockout upon success
-  const reportSuccessfulLogin = useCallback(async (email: string): Promise<void> => {
-    try {
-      await fetch('/api/auth/lockout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase(), action: 'record_success' }),
-      });
-    } catch { }
-  }, []);
-
-  // Standard user sign in
-  const signIn = useCallback(async (email: string, password: string): Promise<User> => {
-    setIsLoading(true);
-    try {
-      const lowerEmail = email.trim().toLowerCase();
-
-      // 1. Proactive Lockout Check: Block login if account is temporarily locked (15 minutes)
-      const lockStatus = await checkLockoutStatus(lowerEmail);
-      if (lockStatus.isLocked) {
+    if (!res.ok || !data.success || !data.session) {
+      if (data.code === 'locked') {
         const err: any = new Error(
           'Account temporarily locked. Your account will automatically unlock when the timer expires.'
         );
         err.isLocked = true;
-        err.lockedUntil = lockStatus.lockedUntil;
-        err.remainingSeconds = lockStatus.remainingSeconds;
+        err.lockedUntil = data.lockedUntil;
+        err.remainingSeconds = data.remainingSeconds || 900;
         throw err;
       }
-
-      // Unified Root Admin Credentials check: labadmin@gmail.com / labadmin32
-      if (
-        (lowerEmail === 'labadmin@gmail.com' ||
-          lowerEmail === 'labadmin@campus.edu' ||
-          lowerEmail === 'labadmin') &&
-        password === 'labadmin32'
-      ) {
-        await reportSuccessfulLogin(lowerEmail);
-        try {
-          const { data } = await supabase.auth.signInWithPassword({
-            email: lowerEmail === 'labadmin' ? 'labadmin@gmail.com' : lowerEmail,
-            password,
-          });
-          if (data?.user) {
-            const profile = await fetchUserProfile(data.user);
-            const adminProfile = { ...profile, role: 'ADMIN' as UserRole };
-            saveUserSession(adminProfile);
-            return adminProfile;
-          }
-        } catch {
-          // Fallback to local admin root session if not in Supabase yet
-        }
-
-        const adminUser: User = {
-          id: 'USR-ROOT-ADMIN',
-          name: 'Lab Operations Admin',
-          email: lowerEmail === 'labadmin' ? 'labadmin@gmail.com' : lowerEmail,
-          role: 'ADMIN',
-          avatar: 'AD',
-          department: 'Campus Infrastructure & Security',
-        };
-        saveUserSession(adminUser);
-        return adminUser;
-      }
-
-      // Enforce @umak.edu.ph domain validation
-      if (
-        !isUmakEmail(lowerEmail) &&
-        lowerEmail !== 'labadmin' &&
-        lowerEmail !== 'labadmin@gmail.com' &&
-        lowerEmail !== 'labassist4umak@gmail.com' &&
-        lowerEmail !== 'umak.labassist@gmail.com'
-      ) {
-        throw new Error('Access restricted: Only @umak.edu.ph email addresses are authorized to sign in.');
-      }
-
-      // Standard Supabase authentication
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-
-      if (error || !data.user) {
-        // Record failed attempt on server (triggers Brevo email on 6th failed attempt)
-        const failResult = await reportFailedAttempt(lowerEmail);
-
-        if (failResult?.isLocked) {
-          const err: any = new Error(
-            'Account temporarily locked. Your account will automatically unlock when the timer expires.'
-          );
-          err.isLocked = true;
-          err.lockedUntil = failResult.lockedUntil;
-          err.remainingSeconds = failResult.remainingSeconds || 900;
-          throw err;
-        }
-
-        const remaining = failResult?.attemptsLeft ?? 5;
+      if (data.code === 'invalid_credentials') {
+        const remaining = data.attemptsLeft ?? 5;
         const err: any = new Error(
           `Invalid email or password. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining`
         );
         err.attemptsLeft = remaining;
         throw err;
       }
+      throw new Error(data.error || 'Sign in failed. Please try again.');
+    }
 
-      // Clear any failed attempts on successful sign in
-      await reportSuccessfulLogin(lowerEmail);
+    const { data: sessionData, error } = await supabase.auth.setSession(data.session);
+    if (error || !sessionData.user) throw new Error(error?.message || 'Could not start your session.');
+    return sessionData.user;
+  }, []);
 
-      const profile = await fetchUserProfile(data.user);
+  // Standard user sign in
+  const signIn = useCallback(async (email: string, password: string): Promise<User> => {
+    setIsLoading(true);
+    try {
+      // Any existing account may sign in (registration is what's limited to @umak.edu.ph)
+      const authUser = await passwordSignIn(email, password);
+      const profile = await fetchUserProfile(authUser);
       saveUserSession(profile);
       return profile;
     } finally {
       setIsLoading(false);
     }
-  }, [checkLockoutStatus, reportFailedAttempt, reportSuccessfulLogin]);
+  }, [passwordSignIn]);
 
   // Request Email OTP for Sign Up via Brevo
   const requestSignupOtp = useCallback(async (name: string, email: string, password: string): Promise<{ needOtp: boolean; user?: User }> => {
@@ -516,22 +397,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(data.error || 'Invalid or expired verification code.');
       }
 
-      // Sign in the newly created account
-      if (password) {
-        return await signIn(trimmedEmail, password);
+      // Sign in the newly created account to get a real session
+      if (!password) {
+        throw new Error('Account created. Please sign in with your new password.');
       }
-
-      const resolvedRole = data.role || (await resolveRole(trimmedEmail, 'STUDENT'));
-      const newUser: User = {
-        id: 'usr-' + Date.now(),
-        name: trimmedName,
-        email: trimmedEmail,
-        role: resolvedRole,
-        avatar: getInitials(trimmedName),
-        department: 'Undergraduate Engineering',
-      };
-      saveUserSession(newUser);
-      return newUser;
+      return await signIn(trimmedEmail, password);
     } finally {
       setIsLoading(false);
     }
@@ -560,10 +430,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const requestPasswordReset = useCallback(async (email: string): Promise<void> => {
     setIsLoading(true);
     try {
+      // Any existing account (including staff accounts outside @umak.edu.ph) can recover its password;
+      // the code only goes to the account's own inbox
       const lower = email.trim().toLowerCase();
-      if (!isUmakEmail(lower)) {
-        throw new Error('Access restricted: Only @umak.edu.ph email addresses are supported for password recovery.');
-      }
 
       const res = await fetch('/api/send-otp', {
         method: 'POST',
@@ -599,6 +468,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Invalid or expired recovery code.');
       }
+      resetTokenRef.current = data.resetToken || null;
     } finally {
       setIsLoading(false);
     }
@@ -609,13 +479,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     try {
       if (email) {
-        const cleanEmail = email.trim().toLowerCase();
-        // Use the dedicated update-password endpoint (admin-level, no OTP re-check needed)
+        // Recovery flow: the server only accepts the token issued when the recovery OTP was verified
+        // (it also clears any lockout on the account)
+        if (!resetTokenRef.current) {
+          throw new Error('Please verify your recovery code first.');
+        }
         const res = await fetch('/api/update-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            email: cleanEmail,
+            resetToken: resetTokenRef.current,
             newPassword,
           }),
         });
@@ -623,8 +496,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!res.ok || !data.success) {
           throw new Error(data.error || 'Failed to update password. Please try again.');
         }
-        // Unlock account and reset failed attempts
-        await reportSuccessfulLogin(cleanEmail);
+        resetTokenRef.current = null;
       } else {
         // Fallback: update via active Supabase session (e.g. after OAuth token)
         const { error } = await supabase.auth.updateUser({ password: newPassword });
@@ -633,7 +505,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [reportSuccessfulLogin]);
+  }, []);
 
   // Standard user sign up -> fallback direct signup
   const signUp = useCallback(async (name: string, email: string, password: string): Promise<User> => {
@@ -700,12 +572,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!data.user) throw new Error('Failed to retrieve user information from Google.');
 
       const email = (data.user.email || '').toLowerCase().trim();
-      const isAdmin =
-        email === 'labadmin@gmail.com' ||
-        email === 'labadmin@campus.edu' ||
-        email === 'labassist4umak@gmail.com';
 
-      if (!isAdmin && !isUmakEmail(email)) {
+      // Check if profile exists
+      const [{ data: profileRow }, { data: userRow }] = await Promise.all([
+        supabase.from('profiles').select('id').eq('id', data.user.id).maybeSingle(),
+        supabase.from('users').select('id').eq('id', data.user.id).maybeSingle(),
+      ]);
+
+      // Non-UMak Google accounts may only sign in to accounts that already exist (e.g. staff added by an admin)
+      if (!isUmakEmail(email) && !profileRow && !userRow) {
         await supabase.auth.signOut();
         throw new Error('Access restricted: Only Google accounts with the @umak.edu.ph domain are authorized.');
       }
@@ -720,12 +595,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         err.remainingSeconds = lockStatus.remainingSeconds;
         throw err;
       }
-
-      // Check if profile exists
-      const [{ data: profileRow }, { data: userRow }] = await Promise.all([
-        supabase.from('profiles').select('id').eq('id', data.user.id).maybeSingle(),
-        supabase.from('users').select('id').eq('id', data.user.id).maybeSingle(),
-      ]);
 
       const isNewUser = !profileRow && !userRow;
       const fullName = data.user.user_metadata?.full_name || data.user.user_metadata?.name || email.split('@')[0];
@@ -826,69 +695,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [fetchUserProfile, saveUserSession]);
 
 
-  // Root Admin Login
+  // Admin Login: admin accounts are regular Supabase accounts whose profile role is ADMIN.
+  // The password check, lockout and failure counting all happen in /api/auth/signin.
   const adminLogin = useCallback(async (username: string, password: string): Promise<boolean> => {
     setIsLoading(true);
-    await new Promise(r => setTimeout(r, 400));
-
-    const lower = username.trim().toLowerCase();
-
-    // Check lockout first
-    const lockStatus = await checkLockoutStatus(lower);
-    if (lockStatus.isLocked) {
-      setIsLoading(false);
-      const err: any = new Error('Account temporarily locked. Your account will automatically unlock when the timer expires.');
-      err.isLocked = true;
-      err.lockedUntil = lockStatus.lockedUntil;
-      err.remainingSeconds = lockStatus.remainingSeconds;
-      throw err;
-    }
-
-    if (
-      (lower === 'labadmin' || lower === 'labadmin@gmail.com' || lower === 'labadmin@campus.edu') &&
-      password === 'labadmin32'
-    ) {
-      await reportSuccessfulLogin(lower);
-      const adminUser: User = {
-        id: 'USR-ROOT-ADMIN',
-        name: 'Lab Operations Admin',
-        email: lower === 'labadmin' ? 'labadmin@gmail.com' : lower,
-        role: 'ADMIN',
-        avatar: 'AD',
-        department: 'Campus Infrastructure & Security',
-      };
-      saveUserSession(adminUser);
-      setIsLoading(false);
-      return true;
-    }
-
-    // Also attempt Supabase sign in for admin
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email: username, password });
-      if (!error && data.user) {
-        const profile = await fetchUserProfile(data.user);
-        if (profile.role === 'ADMIN') {
-          await reportSuccessfulLogin(lower);
-          saveUserSession(profile);
-          setIsLoading(false);
-          return true;
+      let authUser;
+      try {
+        authUser = await passwordSignIn(username, password);
+      } catch (err: any) {
+        if (err?.isLocked) throw err;
+        if (err?.attemptsLeft !== undefined) {
+          const remaining = err.attemptsLeft;
+          throw new Error(`Invalid Administrator Credentials. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`);
         }
+        throw err;
       }
-    } catch {
-      // Ignore
+
+      const profile = await fetchUserProfile(authUser);
+      if (profile.role !== 'ADMIN') {
+        // Valid credentials but not an admin: don't leave a session open from the admin portal
+        await supabase.auth.signOut();
+        throw new Error('This account does not have administrator access.');
+      }
+
+      saveUserSession(profile);
+      return true;
+    } finally {
+      setIsLoading(false);
     }
-
-    // Record failed attempt
-    const failResult = await reportFailedAttempt(lower);
-    setIsLoading(false);
-
-    if (failResult?.isLocked) {
-      throw new Error('Account temporarily locked. Your account will automatically unlock when the timer expires.');
-    }
-
-    const remaining = failResult?.attemptsLeft ?? 5;
-    throw new Error(`Invalid Administrator Credentials. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`);
-  }, [checkLockoutStatus, reportFailedAttempt, reportSuccessfulLogin]);
+  }, [passwordSignIn]);
 
   // Admin Promotion Workflow: Updates state, local storage & Supabase profiles
   const promoteUser = useCallback(async (emailOrId: string, newRole: UserRole) => {
@@ -900,16 +736,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return updated;
     });
 
-    try {
-      // Sync to Supabase profiles
-      await supabase
-        .from('profiles')
-        .update({ role: newRole, updated_at: new Date().toISOString() })
-        .or(`id.eq.${emailOrId},email.eq.${emailOrId}`);
-    } catch {
-      // Ignore
-    }
-
+    // The database role itself is changed server-side by POST /api/admin/users
     setUser(current => {
       if (current && (current.email === emailOrId || current.id === emailOrId)) {
         const updated = { ...current, role: newRole };
@@ -1089,20 +916,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(data.error || 'Invalid or expired verification code.');
       }
 
-      // If password provided, sign into Supabase to acquire full session
+      // If password provided, sign in through the server to acquire a full session
+      // (wrong passwords count toward the lockout like any other sign-in)
       if (password) {
-        try {
-          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email: cleanEmail,
-            password,
-          });
-
-          if (authData?.user && !authError) {
-            const profile = await fetchUserProfile(authData.user);
-            saveUserSession(profile);
-            return profile;
-          }
-        } catch { }
+        const authUser = await passwordSignIn(cleanEmail, password);
+        const profile = await fetchUserProfile(authUser);
+        saveUserSession(profile);
+        return profile;
       }
 
       // Check current session
@@ -1113,23 +933,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return profile;
       }
 
-      // Fallback
-      const resolvedRole = data.role || (await resolveRole(cleanEmail, 'STUDENT'));
-      const loggedUser: User = {
-        id: 'usr-' + Date.now(),
-        name: cleanEmail.split('@')[0],
-        email: cleanEmail,
-        role: resolvedRole,
-        avatar: getInitials(cleanEmail),
-        department: 'Undergraduate Engineering',
-        requireLoginOtp: true,
-      };
-      saveUserSession(loggedUser);
-      return loggedUser;
+      // A verified code alone is not a login: a real Supabase session is required
+      throw new Error('Code verified, but your session has expired. Please sign in again.');
     } finally {
       setIsLoading(false);
     }
-  }, [fetchUserProfile]);
+  }, [fetchUserProfile, passwordSignIn]);
 
   const signOut = useCallback(async () => {
     try {

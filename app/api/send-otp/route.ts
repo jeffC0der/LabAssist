@@ -233,7 +233,7 @@ export async function POST(request: Request): Promise<NextResponse<SendOtpRespon
       );
     }
 
-    const { email, otpCode, purpose = 'verification', name } = body;
+    const { email, purpose = 'verification', name } = body;
 
     // 2. Validate input fields
     if (!email || typeof email !== 'string' || !email.trim()) {
@@ -254,14 +254,21 @@ export async function POST(request: Request): Promise<NextResponse<SendOtpRespon
       );
     }
 
-    // 3. Generate or use provided 6-digit OTP code
-    const finalOtp =
-      otpCode && typeof otpCode === 'string' && otpCode.trim().length === 6
-        ? otpCode.trim()
-        : generateNumericOtp(6);
+    // 3. Always generate the code on the server — a caller-chosen code would let anyone verify any email
+    const finalOtp = generateNumericOtp(6);
 
     // 4. Save to OTP store with 10-minute validity
-    saveOtp(cleanEmail, finalOtp, 10, purpose, { name });
+    const saved = await saveOtp(cleanEmail, finalOtp, 10, purpose, { name });
+    if (!saved.ok) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `A code was just sent. Please wait ${saved.retryAfterSeconds} seconds before requesting another.`,
+          retryAfterSeconds: saved.retryAfterSeconds,
+        },
+        { status: 429 }
+      );
+    }
 
     // 5. Decrypt Brevo API Key (AES-256-GCM encrypted at rest)
     let apiKey: string;

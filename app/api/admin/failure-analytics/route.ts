@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAuth } from '@/lib/serverAuth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -36,7 +37,10 @@ export interface FailureStation {
 }
 
 // ── GET: Raw incident, lab and fleet data straight from the database (no placeholder fallback) ──
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAuth(request, ['ADMIN']);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return NextResponse.json(

@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { verifyAndConsumeOtp } from '@/lib/otpStore';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+import { getServiceClient } from '@/lib/serverAuth';
+import { issueResetToken } from '@/lib/resetToken';
 
 interface VerifyOtpRequestBody {
   email?: string;
@@ -11,7 +10,44 @@ interface VerifyOtpRequestBody {
   purpose?: 'signup' | 'password_reset' | 'oauth_signup' | 'login' | 'verification';
   name?: string;
   password?: string;
-  newPassword?: string;
+}
+
+async function findAuthUserByEmail(supabaseAdmin: SupabaseClient, email: string) {
+  const { data: usersList } = await supabaseAdmin.auth.admin.listUsers();
+  return usersList?.users?.find((u) => u.email?.toLowerCase() === email) || null;
+}
+
+// Create the profile for a newly verified account. Existing profiles are never overwritten,
+// so a verification can't change the role an admin assigned.
+async function ensureProfile(
+  supabaseAdmin: SupabaseClient,
+  userId: string,
+  email: string,
+  name: string,
+  role: string,
+  department: string
+): Promise<string> {
+  const { data: existing } = await supabaseAdmin.from('profiles').select('role').eq('id', userId).maybeSingle();
+  if (existing) return existing.role;
+
+  await supabaseAdmin.from('profiles').upsert(
+    {
+      id: userId,
+      email,
+      name,
+      role,
+      avatar: name.substring(0, 2).toUpperCase(),
+      department,
+    },
+    { onConflict: 'id', ignoreDuplicates: true }
+  );
+
+  if (role === 'TECHNICIAN') {
+    try {
+      await supabaseAdmin.from('whitelisted_technicians').upsert({ email, department });
+    } catch {}
+  }
+  return role;
 }
 
 export async function POST(request: Request) {
@@ -26,7 +62,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { email, otpCode, purpose, name, password, newPassword } = body;
+    const { email, otpCode, purpose = 'verification', name, password } = body;
 
     if (!email || typeof email !== 'string' || !email.trim()) {
       return NextResponse.json(
@@ -45,8 +81,8 @@ export async function POST(request: Request) {
     const cleanEmail = email.trim().toLowerCase();
     const cleanOtp = otpCode.trim();
 
-    // 1. Verify and consume OTP from the server store
-    const verification = verifyAndConsumeOtp(cleanEmail, cleanOtp);
+    // 1. Verify and consume OTP — the code must have been issued for this same purpose
+    const verification = await verifyAndConsumeOtp(cleanEmail, cleanOtp, purpose);
 
     if (!verification.valid) {
       return NextResponse.json(
@@ -55,50 +91,38 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Initialize Supabase Admin Client for database and user operations
-    const supabaseAdmin = serviceRoleKey
-      ? createClient(supabaseUrl, serviceRoleKey, {
-          auth: {
-            autoRefreshToken: false,
-            persistSession: false,
-          },
-        })
-      : null;
+    const supabaseAdmin = getServiceClient();
+    if (!supabaseAdmin) {
+      return NextResponse.json(
+        { success: false, error: 'Server configuration error: missing service role key.' },
+        { status: 500 }
+      );
+    }
 
-    // Resolve Role: check allowlist for TECHNICIAN, root check for ADMIN, default STUDENT
+    // Role for NEW accounts only: allowlisted technician emails become TECHNICIAN, everyone else STUDENT.
+    // Admins are only ever assigned from the Admin Console.
     let assignedRole = 'STUDENT';
     let assignedDept = 'Undergraduate Engineering';
-
-    if (
-      cleanEmail === 'labadmin@gmail.com' ||
-      cleanEmail === 'labadmin@campus.edu' ||
-      cleanEmail === 'labassist4umak@gmail.com'
-    ) {
-      assignedRole = 'ADMIN';
-      assignedDept = 'Laboratory Administration';
-    } else if (cleanEmail === 'umak.labassist@gmail.com') {
-      assignedRole = 'TECHNICIAN';
-      assignedDept = 'Hardware Maintenance Div.';
-    } else if (supabaseAdmin) {
-      try {
-        const { data: wl } = await supabaseAdmin
-          .from('whitelisted_technicians')
-          .select('email')
-          .eq('email', cleanEmail)
-          .maybeSingle();
-        if (wl) {
-          assignedRole = 'TECHNICIAN';
-          assignedDept = 'Hardware Maintenance Div.';
-        }
-      } catch {}
-    }
+    try {
+      const { data: wl } = await supabaseAdmin
+        .from('whitelisted_technicians')
+        .select('email')
+        .eq('email', cleanEmail)
+        .maybeSingle();
+      if (wl) {
+        assignedRole = 'TECHNICIAN';
+        assignedDept = 'Hardware Maintenance Div.';
+      }
+    } catch {}
 
     const cleanName = (name || verification.metadata?.name || '').trim() || cleanEmail.split('@')[0];
 
-    // 3. Handle SIGNUP Purpose (Create / activate confirmed account directly)
-    if (purpose === 'signup' && password && supabaseAdmin) {
+    // 2. SIGNUP: create (or activate) the confirmed account
+    if (purpose === 'signup') {
+      if (!password) {
+        return NextResponse.json({ success: false, error: 'Password is required to complete registration.' }, { status: 400 });
+      }
       try {
-        // Try creating user with auto-confirmed email (bypasses Supabase email provider entirely)
         const { data: userData, error: createError } = await supabaseAdmin.auth.admin.createUser({
           email: cleanEmail,
           password,
@@ -106,7 +130,6 @@ export async function POST(request: Request) {
           user_metadata: {
             name: cleanName,
             full_name: cleanName,
-            role: assignedRole,
             department: assignedDept,
           },
         });
@@ -114,67 +137,25 @@ export async function POST(request: Request) {
         let userId = userData?.user?.id;
 
         if (createError) {
-          // If user already exists (e.g. unconfirmed from earlier attempt), find and update their password & confirm email
-          const { data: usersList } = await supabaseAdmin.auth.admin.listUsers();
-          const existingUser = usersList?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
-
-          if (existingUser) {
-            userId = existingUser.id;
-            await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
-              password,
-              email_confirm: true,
-              user_metadata: {
-                name: cleanName,
-                full_name: cleanName,
-                role: assignedRole,
-                department: assignedDept,
-              },
-            });
-          } else {
+          // Account already exists (e.g. unconfirmed from an earlier attempt): the verified OTP proves
+          // ownership of the email, so set the password and confirm it
+          const existingUser = await findAuthUserByEmail(supabaseAdmin, cleanEmail);
+          if (!existingUser) {
             console.error('[verify-otp] Create user error:', createError);
-            return NextResponse.json(
-              { success: false, error: createError.message },
-              { status: 400 }
-            );
+            return NextResponse.json({ success: false, error: createError.message }, { status: 400 });
           }
+          userId = existingUser.id;
+          await supabaseAdmin.auth.admin.updateUserById(existingUser.id, { password, email_confirm: true });
         }
 
-        // Upsert public.profiles and public.users tables
-        if (userId) {
-          try {
-            await supabaseAdmin.from('profiles').upsert({
-              id: userId,
-              email: cleanEmail,
-              name: cleanName,
-              role: assignedRole,
-              avatar: cleanName.substring(0, 2).toUpperCase(),
-              department: assignedDept,
-            });
-          } catch {}
-
-          if (assignedRole === 'TECHNICIAN') {
-            try {
-              await supabaseAdmin.from('whitelisted_technicians').upsert({
-                email: cleanEmail,
-                department: assignedDept,
-              });
-            } catch {}
-          }
-
-          try {
-            await supabaseAdmin.from('users').upsert({
-              id: userId,
-              email: cleanEmail,
-              full_name: cleanName,
-              role: assignedRole,
-            });
-          } catch {}
-        }
+        const role = userId
+          ? await ensureProfile(supabaseAdmin, userId, cleanEmail, cleanName, assignedRole, assignedDept)
+          : assignedRole;
 
         return NextResponse.json({
           success: true,
           message: 'Account verified and created successfully.',
-          role: assignedRole,
+          role,
         });
       } catch (err: any) {
         console.error('[verify-otp] Signup processing error:', err);
@@ -185,84 +166,35 @@ export async function POST(request: Request) {
       }
     }
 
-    // 4. Handle PASSWORD RESET Purpose
-    if ((purpose === 'password_reset' || newPassword) && supabaseAdmin) {
-      try {
-        const { data: usersList } = await supabaseAdmin.auth.admin.listUsers();
-        const targetUser = usersList?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
-
-        if (!targetUser) {
-          return NextResponse.json(
-            { success: false, error: 'User account not found for password reset.' },
-            { status: 404 }
-          );
-        }
-
-        if (newPassword) {
-          const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(targetUser.id, {
-            password: newPassword,
-          });
-
-          if (updateErr) {
-            return NextResponse.json(
-              { success: false, error: updateErr.message },
-              { status: 400 }
-            );
-          }
-
-          return NextResponse.json({
-            success: true,
-            message: 'Password updated successfully. You can now sign in.',
-          });
-        }
-
-        return NextResponse.json({
-          success: true,
-          message: 'Recovery OTP verified successfully.',
-        });
-      } catch (err: any) {
-        console.error('[verify-otp] Password reset processing error:', err);
+    // 3. PASSWORD RESET: hand back a short-lived token that /api/update-password requires
+    if (purpose === 'password_reset') {
+      const targetUser = await findAuthUserByEmail(supabaseAdmin, cleanEmail);
+      if (!targetUser) {
         return NextResponse.json(
-          { success: false, error: err?.message || 'Failed to process password reset.' },
-          { status: 500 }
+          { success: false, error: 'User account not found for password reset.' },
+          { status: 404 }
         );
       }
+      return NextResponse.json({
+        success: true,
+        message: 'Recovery OTP verified successfully.',
+        resetToken: issueResetToken(cleanEmail),
+      });
     }
 
-    // 5. General Verification (OAuth first-time login / activation)
-    if (supabaseAdmin) {
-      try {
-        const { data: usersList } = await supabaseAdmin.auth.admin.listUsers();
-        const targetUser = usersList?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
-
-        if (targetUser) {
-          try {
-            await supabaseAdmin.from('profiles').upsert({
-              id: targetUser.id,
-              email: cleanEmail,
-              name: cleanName,
-              role: assignedRole,
-              avatar: cleanName.substring(0, 2).toUpperCase(),
-              department: 'Undergraduate Engineering',
-            });
-          } catch {}
-
-          try {
-            await supabaseAdmin.from('users').upsert({
-              id: targetUser.id,
-              email: cleanEmail,
-              full_name: cleanName,
-              role: assignedRole,
-            });
-          } catch {}
-        }
-      } catch {}
-    }
+    // 4. LOGIN / OAUTH FIRST-TIME VERIFICATION: create the profile if the account has none yet
+    let role = assignedRole;
+    try {
+      const targetUser = await findAuthUserByEmail(supabaseAdmin, cleanEmail);
+      if (targetUser) {
+        role = await ensureProfile(supabaseAdmin, targetUser.id, cleanEmail, cleanName, assignedRole, assignedDept);
+      }
+    } catch {}
 
     return NextResponse.json({
       success: true,
       message: 'OTP verified successfully.',
-      role: assignedRole,
+      role,
     });
   } catch (err: any) {
     console.error('[verify-otp] Server error:', err);

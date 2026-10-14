@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAuth } from '@/lib/serverAuth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -14,7 +15,10 @@ function getAdminClient() {
 }
 
 // GET: Fetch all users (from profiles, users table, and auth)
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAuth(request, ['ADMIN']);
+  if (auth.response) return auth.response;
+
   try {
     const supabaseAdmin = getAdminClient();
 
@@ -46,14 +50,8 @@ export async function GET() {
       if (!profileMap.has(au.id) && !profileMap.has(email)) {
         const meta = au.user_metadata || {};
         const name = meta.full_name || meta.name || email.split('@')[0];
-        const role =
-          email === 'labadmin@gmail.com' ||
-          email === 'labadmin@campus.edu' ||
-          email === 'labassist4umak@gmail.com'
-            ? 'ADMIN'
-            : email === 'umak.labassist@gmail.com'
-            ? 'TECHNICIAN'
-            : (meta.role || 'STUDENT');
+        // No profile row yet: roles only ever come from profiles, so treat as STUDENT
+        const role = 'STUDENT';
         combinedUsers.push({
           id: au.id,
           email: au.email,
@@ -74,12 +72,21 @@ export async function GET() {
 
 // POST: Update user role
 export async function POST(request: Request) {
+  const auth = await requireAuth(request, ['ADMIN']);
+  if (auth.response) return auth.response;
+
   try {
     const supabaseAdmin = getAdminClient();
     const { userId, email, newRole } = await request.json();
 
     if (!newRole || (!userId && !email)) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+    if (!['STUDENT', 'TECHNICIAN', 'ADMIN'].includes(newRole)) {
+      return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
+    }
+    if (userId === auth.user.id || (email || '').toLowerCase().trim() === auth.user.email) {
+      return NextResponse.json({ error: 'You cannot change your own role.' }, { status: 400 });
     }
 
     const lowerEmail = (email || '').toLowerCase().trim();

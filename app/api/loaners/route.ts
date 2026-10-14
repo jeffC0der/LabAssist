@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAuth, getAuthUser, STAFF_ROLES } from '@/lib/serverAuth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -51,7 +52,9 @@ function rowToLoanerRequest(row: any) {
 }
 
 // ── GET: Fetch loaner items and active requests ──
-export async function GET() {
+export async function GET(request: Request) {
+  // Items are public; requests (which carry locker PINs) only go to their owner or to staff
+  const caller = await getAuthUser(request);
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return NextResponse.json({ items: SEED_LOANER_ITEMS.map(rowToLoanerItem), requests: [] });
@@ -86,9 +89,17 @@ export async function GET() {
     if (itemsErr) console.warn('loaner_items query warning:', itemsErr.message);
     if (reqErr) console.warn('loaner_requests query warning:', reqErr.message);
 
+    const isStaff = !!caller && STAFF_ROLES.includes(caller.role);
+    const ownNames = caller
+      ? [caller.name.trim().toLowerCase(), caller.email.split('@')[0]]
+      : [];
+    const visibleRequests = isStaff
+      ? requests || []
+      : (requests || []).filter((r: any) => ownNames.includes((r.student_name || '').trim().toLowerCase()));
+
     return NextResponse.json({
       items: finalItems.map(rowToLoanerItem),
-      requests: (requests || []).map(rowToLoanerRequest),
+      requests: visibleRequests.map(rowToLoanerRequest),
     });
   } catch (err: any) {
     console.error('Error fetching loaners:', err);
@@ -98,6 +109,9 @@ export async function GET() {
 
 // ── POST: Create a new loaner request ──
 export async function POST(request: Request) {
+  const auth = await requireAuth(request);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
 
   try {
@@ -168,6 +182,9 @@ export async function POST(request: Request) {
 
 // ── PATCH: Update request status (CHECKED_OUT / RETURNED) ──
 export async function PATCH(request: Request) {
+  const auth = await requireAuth(request, STAFF_ROLES);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
 
   try {

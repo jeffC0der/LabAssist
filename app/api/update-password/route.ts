@@ -1,22 +1,27 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/serverAuth';
+import { verifyResetToken } from '@/lib/resetToken';
+import { resetLockout } from '@/lib/lockoutStore';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
+// Sets a new password after a verified password-reset OTP.
+// Requires the resetToken returned by /api/verify-otp (purpose: password_reset).
 export async function POST(request: Request) {
   try {
-    let body: { email?: string; newPassword?: string };
+    let body: { resetToken?: string; newPassword?: string };
     try {
       body = await request.json();
     } catch {
       return NextResponse.json({ success: false, error: 'Invalid JSON request body.' }, { status: 400 });
     }
 
-    const { email, newPassword } = body;
+    const { resetToken, newPassword } = body;
 
-    if (!email || !email.trim()) {
-      return NextResponse.json({ success: false, error: 'Email is required.' }, { status: 400 });
+    const cleanEmail = verifyResetToken(resetToken || '');
+    if (!cleanEmail) {
+      return NextResponse.json(
+        { success: false, error: 'Your password reset session has expired. Please request a new recovery code.' },
+        { status: 401 }
+      );
     }
 
     if (!newPassword || newPassword.length < 16) {
@@ -26,18 +31,13 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!serviceRoleKey) {
+    const supabaseAdmin = getServiceClient();
+    if (!supabaseAdmin) {
       return NextResponse.json(
         { success: false, error: 'Server configuration error: missing service role key.' },
         { status: 500 }
       );
     }
-
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-
-    const cleanEmail = email.trim().toLowerCase();
 
     // Find the user by email
     const { data: usersList } = await supabaseAdmin.auth.admin.listUsers();
@@ -58,6 +58,9 @@ export async function POST(request: Request) {
     if (updateErr) {
       return NextResponse.json({ success: false, error: updateErr.message }, { status: 400 });
     }
+
+    // A completed reset also clears any login lockout on the account
+    await resetLockout(cleanEmail);
 
     return NextResponse.json({ success: true, message: 'Password updated successfully.' });
   } catch (err: any) {

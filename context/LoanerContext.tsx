@@ -46,6 +46,14 @@ export function LoanerProvider({ children }: { children: React.ReactNode }) {
     refreshLoaners();
   }, [refreshLoaners]);
 
+  // Reload when the user signs in or out: the API only returns data for the signed-in caller
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') refreshLoaners();
+    });
+    return () => data.subscription.unsubscribe();
+  }, [refreshLoaners]);
+
   // Supabase Realtime for loaner_requests
   useEffect(() => {
     try {

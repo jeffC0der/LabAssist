@@ -59,6 +59,14 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
     refreshTickets();
   }, [refreshTickets]);
 
+  // Reload when the user signs in or out: the API only returns data for the signed-in caller
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') refreshTickets();
+    });
+    return () => data.subscription.unsubscribe();
+  }, [refreshTickets]);
+
   // Supabase Realtime subscription for live updates across student & technician dashboards
   useEffect(() => {
     try {

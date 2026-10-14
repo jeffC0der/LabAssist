@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { sendRepairReceiptEmail, sendReadyForPickupEmail, sendFinalReceiptEmail } from '@/lib/emailService';
+import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 import {
   extractWorkflowMetadata,
   packWorkflowMetadata,
@@ -256,7 +257,10 @@ const NO_CACHE_HEADERS = {
 };
 
 // ── GET: Fetch all device repair records ──
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAuth(request);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return NextResponse.json(
@@ -296,8 +300,18 @@ export async function GET() {
       }
     }
 
+    // Students only receive their own repair records; staff see every job
+    const isStaff = STAFF_ROLES.includes(auth.user.role);
+    const visibleRows = isStaff
+      ? data
+      : data.filter(
+          (r) =>
+            (r.client_email || '').trim().toLowerCase() === auth.user.email ||
+            (r.user_id && r.user_id === auth.user.id)
+        );
+
     return NextResponse.json(
-      { repairs: data.map((r) => rowToRepair(r, true)) },
+      { repairs: visibleRows.map((r) => rowToRepair(r, true)) },
       { headers: NO_CACHE_HEADERS }
     );
   } catch (err: any) {
@@ -308,6 +322,9 @@ export async function GET() {
 
 // ── POST: Submit a new device repair intake ──
 export async function POST(request: Request) {
+  const auth = await requireAuth(request);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
 
   try {
@@ -520,6 +537,9 @@ export async function POST(request: Request) {
 
 // ── PATCH: Update repair status, evaluation, billing, completion, or cancellation ──
 export async function PATCH(request: Request) {
+  const auth = await requireAuth(request, STAFF_ROLES);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
 
   try {

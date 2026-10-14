@@ -182,6 +182,9 @@ export function RepairProvider({ children }: { children: React.ReactNode }) {
           }
           setRepairs(uniqueRepairs);
         }
+      } else if (res.status === 401) {
+        // Signed out: don't keep the previous user's repair records in memory
+        setRepairs([]);
       }
     } catch (err) {
       console.warn('Failed to load repairs from API:', err);

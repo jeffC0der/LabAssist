@@ -158,7 +158,7 @@ export default function AuthCard() {
 
   // Computed validation
   const nameValidation = validateFullName(fullName);
-  const emailValidation = validateEmail(email);
+  const emailValidation = validateEmail(email, view === 'signup');
   const strength = checkPasswordStrength(password);
   const newStrength = checkPasswordStrength(newPassword);
 

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAuth } from '@/lib/serverAuth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -14,7 +15,10 @@ function getAdminClient() {
 }
 
 // GET: Fetch allowlisted technicians
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAuth(request, ['ADMIN']);
+  if (auth.response) return auth.response;
+
   try {
     const supabaseAdmin = getAdminClient();
     const { data, error } = await supabaseAdmin
@@ -46,6 +50,9 @@ export async function GET() {
 
 // POST: Add email to allowlist
 export async function POST(request: Request) {
+  const auth = await requireAuth(request, ['ADMIN']);
+  if (auth.response) return auth.response;
+
   try {
     const supabaseAdmin = getAdminClient();
     const { email, department } = await request.json();
@@ -95,6 +102,9 @@ export async function POST(request: Request) {
 
 // DELETE: Remove email from allowlist
 export async function DELETE(request: Request) {
+  const auth = await requireAuth(request, ['ADMIN']);
+  if (auth.response) return auth.response;
+
   try {
     const supabaseAdmin = getAdminClient();
     const { searchParams } = new URL(request.url);

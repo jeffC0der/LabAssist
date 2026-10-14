@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { sendInvoiceNotificationEmail } from '@/lib/emailService';
+import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 import {
   getInMemoryInvoice,
   setInMemoryInvoice,
@@ -194,6 +195,9 @@ function repairInvoiceRowToInvoice(row: any) {
 
 // ── GET: Fetch invoice and invoice items for a Job Order ──
 export async function GET(request: Request) {
+  const auth = await requireAuth(request, STAFF_ROLES);
+  if (auth.response) return auth.response;
+
   const { searchParams } = new URL(request.url);
   const jobOrderId = searchParams.get('jobOrderId');
   const jobOrderNumber = searchParams.get('jobOrderNumber') || searchParams.get('rmaNumber');
@@ -342,6 +346,9 @@ export async function GET(request: Request) {
 
 // ── POST: Create or update Invoice with Line Items ──
 export async function POST(request: Request) {
+  const auth = await requireAuth(request, STAFF_ROLES);
+  if (auth.response) return auth.response;
+
   try {
     const body = await request.json();
     const {

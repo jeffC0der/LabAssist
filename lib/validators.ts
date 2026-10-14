@@ -5,30 +5,23 @@ export const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-z
 
 export const ALLOWED_EMAIL_DOMAIN = '@umak.edu.ph';
 
-/** Check if email belongs to @umak.edu.ph or is an authorized root admin account */
+/** Check if email belongs to the @umak.edu.ph domain (required for new registrations) */
 export function isUmakEmail(email: string): boolean {
   if (!email) return false;
-  const lower = email.trim().toLowerCase();
-  if (
-    lower === 'labadmin@gmail.com' ||
-    lower === 'labadmin@campus.edu' ||
-    lower === 'labadmin' ||
-    lower === 'admin@campus.edu' ||
-    lower === 'labassist4umak@gmail.com' ||
-    lower === 'umak.labassist@gmail.com'
-  ) {
-    return true;
-  }
-  return lower.endsWith(ALLOWED_EMAIL_DOMAIN);
+  return email.trim().toLowerCase().endsWith(ALLOWED_EMAIL_DOMAIN);
 }
 
-export function validateEmail(email: string): { valid: boolean; message: string } {
+/**
+ * Validate an email field. `requireUmak` enforces the campus domain (registration);
+ * sign-in and recovery accept any existing account, e.g. staff accounts added by an admin.
+ */
+export function validateEmail(email: string, requireUmak = true): { valid: boolean; message: string } {
   if (!email || !email.trim()) return { valid: false, message: 'Campus email is required.' };
   const lower = email.trim().toLowerCase();
   if (!EMAIL_REGEX.test(lower)) {
     return { valid: false, message: 'Invalid email address format.' };
   }
-  if (!isUmakEmail(lower)) {
+  if (requireUmak && !isUmakEmail(lower)) {
     return { valid: false, message: 'Only @umak.edu.ph email addresses are allowed.' };
   }
   return { valid: true, message: '' };

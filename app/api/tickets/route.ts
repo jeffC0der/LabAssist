@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { MOCK_TICKETS, type Ticket, type TicketStatus } from '@/lib/mockData';
+import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -81,7 +82,10 @@ function ticketToRow(ticket: Ticket) {
 }
 
 // ── GET: Fetch all tickets (seeds DB with initial tickets if empty) ──
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAuth(request);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return NextResponse.json({ tickets: MOCK_TICKETS });
@@ -109,6 +113,9 @@ export async function GET() {
 
 // ── POST: Create new ticket & update workstation status to UNDER_REPAIR ──
 export async function POST(request: Request) {
+  const auth = await requireAuth(request);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
 
   try {
@@ -149,6 +156,9 @@ export async function POST(request: Request) {
 
 // ── PATCH: Update ticket (dispatch / resolve) & update workstation status ──
 export async function PATCH(request: Request) {
+  const auth = await requireAuth(request, STAFF_ROLES);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
 
   try {

@@ -40,7 +40,7 @@ CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 DECLARE
   user_name TEXT;
-  user_role TEXT;
+  user_role TEXT := 'STUDENT';
   user_dept TEXT;
 BEGIN
   user_name := COALESCE(
@@ -48,17 +48,11 @@ BEGIN
     NEW.raw_user_meta_data->>'name',
     split_part(NEW.email, '@', 1)
   );
-  
-  -- Default to 'STUDENT' unless specified or if root admin / technician email
-  IF NEW.email = 'labadmin@campus.edu' OR NEW.email = 'labadmin@gmail.com' OR NEW.email = 'labassist4umak@gmail.com' THEN
-    user_role := 'ADMIN';
-    user_dept := COALESCE(NEW.raw_user_meta_data->>'department', 'Laboratory Administration');
-  ELSIF NEW.email = 'umak.labassist@gmail.com' THEN
+  user_dept := COALESCE(NEW.raw_user_meta_data->>'department', 'Undergraduate Engineering');
+
+  IF EXISTS (SELECT 1 FROM public.whitelisted_technicians w WHERE lower(w.email) = lower(NEW.email)) THEN
     user_role := 'TECHNICIAN';
-    user_dept := COALESCE(NEW.raw_user_meta_data->>'department', 'Hardware Maintenance Div.');
-  ELSE
-    user_role := COALESCE(NEW.raw_user_meta_data->>'role', 'STUDENT');
-    user_dept := COALESCE(NEW.raw_user_meta_data->>'department', 'Campus General Body');
+    user_dept := 'Hardware Maintenance Div.';
   END IF;
 
   INSERT INTO public.profiles (id, email, name, role, avatar, department)
@@ -77,13 +71,53 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Recreate trigger
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- 2b. PROTECT PRIVILEGED PROFILE COLUMNS
+-- Signed-in non-admin users may still edit their own name/department/avatar,
+-- but role, status and email silently keep their stored values.
+CREATE OR REPLACE FUNCTION public.protect_profile_privileges()
+RETURNS TRIGGER AS $$
+DECLARE
+  caller_role TEXT;
+BEGIN
+  -- Server code using the service-role key, and the SQL editor, may change anything
+  IF auth.role() = 'service_role' OR auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT role INTO caller_role FROM public.profiles WHERE id = auth.uid();
+  IF caller_role = 'ADMIN' THEN
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    NEW.role := CASE
+      WHEN EXISTS (SELECT 1 FROM public.whitelisted_technicians w WHERE lower(w.email) = lower(NEW.email))
+        THEN 'TECHNICIAN'
+      ELSE 'STUDENT'
+    END;
+    NEW.status := 'ACTIVE';
+  ELSE
+    NEW.role := OLD.role;
+    NEW.status := OLD.status;
+    NEW.email := OLD.email;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS protect_profile_privileges ON public.profiles;
+CREATE TRIGGER protect_profile_privileges
+  BEFORE INSERT OR UPDATE ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.protect_profile_privileges();
 
 -- 3. LAB ROOMS TABLE
 CREATE TABLE IF NOT EXISTS public.labs (
@@ -285,11 +319,24 @@ CREATE TABLE IF NOT EXISTS public.account_lockouts (
 );
 
 ALTER TABLE public.account_lockouts ENABLE ROW LEVEL SECURITY;
+-- Lockout status is read through /api/auth/lockout, never directly
 DROP POLICY IF EXISTS "Lockout status viewable by anyone" ON public.account_lockouts;
-CREATE POLICY "Lockout status viewable by anyone" ON public.account_lockouts FOR SELECT USING (true);
 
+-- Only the server (service role, which bypasses RLS) manages lockout records
 DROP POLICY IF EXISTS "Service role can manage lockouts" ON public.account_lockouts;
-CREATE POLICY "Service role can manage lockouts" ON public.account_lockouts FOR ALL USING (true);
+
+-- 5. ONE-TIME CODES: stored in the database (hashed) so they survive restarts and work on every
+--    server instance. RLS on with no policies = only the server's service-role key can access it.
+CREATE TABLE IF NOT EXISTS public.otp_codes (
+  email TEXT PRIMARY KEY,                -- lowercase email
+  code_hash TEXT NOT NULL,               -- HMAC of the code, never the code itself
+  purpose TEXT NOT NULL DEFAULT 'verification',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  attempts INT NOT NULL DEFAULT 0,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE public.otp_codes ENABLE ROW LEVEL SECURITY;
 
 -- ==============================================================================
 -- 11. INITIAL SEED DATA FOR LAB ROOMS (LAB-101 to LAB-105)

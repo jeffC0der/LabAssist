@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { sendRepairReceiptEmail } from '@/lib/emailService';
+import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 
 export async function POST(request: Request) {
+  const auth = await requireAuth(request, STAFF_ROLES);
+  if (auth.response) return auth.response;
+
   try {
     const body = await request.json();
     const {

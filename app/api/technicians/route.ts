@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -24,7 +25,10 @@ export interface AvailableTechnician {
 }
 
 // ── GET: Registered technician accounts only (active TECHNICIAN profiles), with their current job load ──
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAuth(request, STAFF_ROLES);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return NextResponse.json({ error: 'Database is not configured', technicians: [] }, { status: 503 });

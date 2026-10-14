@@ -20,38 +20,27 @@ export default function AuthCallbackPage() {
       const meta = user.user_metadata || {};
       const fullName = meta.full_name || meta.name || email.split('@')[0];
 
-      // Security Gate: Reject any Google accounts outside @umak.edu.ph
-      if (!isUmakEmail(email)) {
-        setStatusMsg('Access restricted: Only @umak.edu.ph accounts are authorized.');
-        try {
-          await supabase.auth.signOut();
-        } catch {}
-        router.replace('/auth?error=unauthorized_domain');
-        return;
-      }
-
       try {
         const isOtpDisabled =
           process.env.NEXT_PUBLIC_DISABLE_OTP === 'true' ||
           process.env.NEXT_PUBLIC_REQUIRE_OTP === 'false';
-
-        // Admin email: bypass OTP, go straight to admin portal.
-        if (
-          email === 'labadmin@gmail.com' ||
-          email === 'labadmin@campus.edu' ||
-          email === 'labassist4umak@gmail.com'
-        ) {
-          setStatusMsg('Admin account detected. Loading portal…');
-          router.replace('/admin');
-          return;
-        }
-
 
         // Check if user already has a verified record in the database.
         const [{ data: profileRow }, { data: userRow }] = await Promise.all([
           supabase.from('profiles').select('id, role').eq('id', user.id).maybeSingle(),
           supabase.from('users').select('id, role').eq('id', user.id).maybeSingle(),
         ]);
+
+        // Security Gate: new Google accounts must be @umak.edu.ph; outside accounts may only
+        // sign in if they already exist (e.g. staff added by an admin)
+        if (!isUmakEmail(email) && !profileRow && !userRow) {
+          setStatusMsg('Access restricted: Only @umak.edu.ph accounts are authorized.');
+          try {
+            await supabase.auth.signOut();
+          } catch {}
+          router.replace('/auth?error=unauthorized_domain');
+          return;
+        }
 
         // If user has Login OTP (2FA) enabled
         if (meta.require_login_otp) {
@@ -96,7 +85,7 @@ export default function AuthCallbackPage() {
 
           // Route to their portal
           setStatusMsg('Welcome! Loading your workspace…');
-          const role = profileRow?.role || userRow?.role || 'STUDENT';
+          const role = profileRow?.role || 'STUDENT';
           if (role === 'ADMIN') {
             router.replace('/admin');
           } else if (role === 'TECHNICIAN') {

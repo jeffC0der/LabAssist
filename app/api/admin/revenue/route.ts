@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAuth } from '@/lib/serverAuth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -53,6 +54,9 @@ function rowToPayment(row: any): PaymentRecord {
 
 // ── GET: Return revenue metrics and payment list purely from Supabase ──
 export async function GET(request: Request) {
+  const auth = await requireAuth(request, ['ADMIN']);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
   const payments: PaymentRecord[] = [];
 
@@ -292,6 +296,9 @@ export async function GET(request: Request) {
 
 // ── POST: Record a new revenue payment into Supabase database ──
 export async function POST(request: Request) {
+  const auth = await requireAuth(request, ['ADMIN']);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
 
   try {

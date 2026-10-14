@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { MOCK_WORKSTATIONS, type Workstation, type WorkstationStatus } from '@/lib/mockData';
+import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -81,6 +82,9 @@ export async function GET() {
 
 // ── PATCH: Update a workstation status ──
 export async function PATCH(request: Request) {
+  const auth = await requireAuth(request, STAFF_ROLES);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
 
   try {

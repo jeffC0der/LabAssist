@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAuth } from '@/lib/serverAuth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -14,6 +15,9 @@ interface UpdateProfileBody {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAuth(request);
+  if (auth.response) return auth.response;
+
   try {
     let body: UpdateProfileBody;
     try {
@@ -25,16 +29,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const { userId, email, name, department, avatar, requireLoginOtp } = body;
-
-    if (!email && !userId) {
-      return NextResponse.json(
-        { success: false, error: 'User ID or email is required.' },
-        { status: 400 }
-      );
-    }
-
-    const cleanEmail = email ? email.trim().toLowerCase() : undefined;
+    // Users can only update their own profile: the target always comes from the verified session
+    const { name, department, avatar, requireLoginOtp } = body;
+    const userId = auth.user.id;
+    const cleanEmail = auth.user.email;
 
     // Initialize Supabase Admin client
     const supabaseAdmin = serviceRoleKey
@@ -144,10 +142,15 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const auth = await requireAuth(request);
+  if (auth.response) return auth.response;
+
   try {
     const { searchParams } = new URL(request.url);
-    const email = searchParams.get('email');
-    const userId = searchParams.get('userId');
+    // Non-admins can only read their own profile
+    const isAdmin = auth.user.role === 'ADMIN';
+    const email = isAdmin ? searchParams.get('email') : auth.user.email;
+    const userId = isAdmin ? searchParams.get('userId') : auth.user.id;
 
     if (!email && !userId) {
       return NextResponse.json(
