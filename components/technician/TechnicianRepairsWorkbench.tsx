@@ -354,7 +354,9 @@ export default function TechnicianRepairsWorkbench() {
     setIsCheckingInvoice(null);
 
     const totalAmt = invoice ? Number(invoice.totalAmount || 0) : Number(job.billing?.totalAmount || 0);
-    const isPaid = (invoice?.paymentStatus === 'PAID' || job.billing?.paymentStatus === 'PAID') || totalAmt === 0;
+    const paidAmt = invoice ? Number(invoice.amountPaid || 0) : Number(job.billing?.amountPaid || 0);
+    const balanceAmt = Math.max(0, totalAmt - paidAmt);
+    const isPaid = totalAmt === 0 || balanceAmt === 0;
 
     if (isPaid) {
       // CASE 1 — Already Paid in Full (or 0 balance): Allow technician to proceed to device release
@@ -364,12 +366,12 @@ export default function TechnicianRepairsWorkbench() {
       // CASE 2 — Unpaid: Do not allow Job Order to immediately become Completed. Open payment settlement interface
       toast.warning(
         'Settlement Required',
-        `Job Order ${job.id} is Unpaid (₱${totalAmt.toLocaleString()}). Please record payment settlement before device release.`
+        `Job Order ${job.id} has an unpaid balance of ₱${balanceAmt.toLocaleString()} (Paid ₱${paidAmt.toLocaleString()} of ₱${totalAmt.toLocaleString()}). Please record payment settlement before device release.`
       );
       setSettlementModalTarget(job);
       setSettlementInvoiceData(invoice);
       setSettlementMethod('CASH');
-      setSettlementAmount(totalAmt > 0 ? String(totalAmt) : '');
+      setSettlementAmount(balanceAmt > 0 ? String(balanceAmt) : '');
       setSettlementReference('');
     }
   };
@@ -379,7 +381,10 @@ export default function TechnicianRepairsWorkbench() {
     if (!settlementModalTarget) return;
 
     const totalAmt = settlementInvoiceData ? Number(settlementInvoiceData.totalAmount || 0) : Number(settlementModalTarget.billing?.totalAmount || 0);
+    const alreadyPaid = settlementInvoiceData ? Number(settlementInvoiceData.amountPaid || 0) : Number(settlementModalTarget.billing?.amountPaid || 0);
     const amountVal = Number(settlementAmount);
+    // Amount received now is added to what the client already paid (e.g. a partial Pay Now payment)
+    const newTotalPaid = alreadyPaid + amountVal;
 
     if (isNaN(amountVal) || amountVal <= 0) {
       toast.warning('Valid Amount Required', 'Please enter the payment amount received.');
@@ -399,8 +404,8 @@ export default function TechnicianRepairsWorkbench() {
         paymentTiming: 'PAY_AFTER_REPAIR',
         paymentStatus: 'PAID',
         paymentMethod: settlementMethod,
-        amountPaid: amountVal,
-        onlinePaymentReference: settlementMethod === 'ONLINE' ? settlementReference.trim() : null,
+        amountPaid: newTotalPaid,
+        onlinePaymentReference: settlementMethod === 'ONLINE' ? settlementReference.trim() : (settlementInvoiceData?.onlinePaymentReference || null),
         clientName: settlementModalTarget.clientName,
         clientEmail: settlementModalTarget.clientEmail,
         deviceModel: settlementModalTarget.deviceModel,
@@ -428,26 +433,39 @@ export default function TechnicianRepairsWorkbench() {
       }
 
       const resData = await res.json();
+      const savedStatus = resData.invoice?.paymentStatus || 'UNPAID';
+      const savedTotal = Number(resData.invoice?.totalAmount ?? totalAmt);
+      const savedPaid = Number(resData.invoice?.amountPaid ?? newTotalPaid);
+      const remainingBalance = Math.max(0, savedTotal - savedPaid);
 
       await updateRepair(settlementModalTarget.id, {
         status: settlementModalTarget.status,
-        paymentStatus: 'PAID',
+        paymentStatus: savedStatus,
         paymentMethod: settlementMethod,
-        totalAmount: totalAmt,
-        amountPaid: amountVal,
-        onlinePaymentReference: settlementMethod === 'ONLINE' ? settlementReference.trim() : undefined,
-        settlementDate: new Date().toISOString(),
+        totalAmount: savedTotal,
+        amountPaid: savedPaid,
+        onlinePaymentReference: resData.invoice?.onlinePaymentReference || undefined,
+        settlementDate: resData.invoice?.settlementDate || undefined,
       });
-
-      toast.success(
-        'Payment Settled: Paid in Full',
-        `Invoice ${resData.invoice?.invoiceNumber || ''} marked Paid in Full (₱${amountVal.toLocaleString()}). Proceeding to device handover.`
-      );
 
       const targetJob = settlementModalTarget;
       setIsSubmittingSettlement(false);
       setSettlementModalTarget(null);
       setSettlementInvoiceData(null);
+
+      if (remainingBalance > 0) {
+        // Partial payment recorded — device cannot be released until the balance is settled
+        toast.warning(
+          'Partial Payment Recorded',
+          `Invoice ${resData.invoice?.invoiceNumber || ''}: Paid ₱${savedPaid.toLocaleString()} of ₱${savedTotal.toLocaleString()}. Remaining balance: ₱${remainingBalance.toLocaleString()}.`
+        );
+        return;
+      }
+
+      toast.success(
+        'Payment Settled: Paid in Full',
+        `Invoice ${resData.invoice?.invoiceNumber || ''} marked Paid in Full (₱${savedPaid.toLocaleString()}). Proceeding to device handover.`
+      );
 
       // Immediately proceed to device release step
       setReleaseModalTarget(targetJob);
@@ -796,15 +814,16 @@ export default function TechnicianRepairsWorkbench() {
 
       const resData = await res.json();
 
+      // Use the payment status/amount resolved by the server (PAID only when the full total is received)
       await updateRepair(billingTarget.id, {
         status: billingTarget.status,
         paymentTiming: billingPaymentTiming,
-        paymentStatus: billingPaymentTiming === 'PAY_NOW' ? 'PAID' : 'UNPAID',
+        paymentStatus: resData.invoice?.paymentStatus || 'UNPAID',
         paymentMethod: billingPaymentTiming === 'PAY_NOW' ? billingPaymentMethod : (billingPaymentMethod || undefined),
         totalAmount: calculatedBillingTotal,
-        amountPaid: billingPaymentTiming === 'PAY_NOW' ? Number(billingAmountPaid) : 0,
+        amountPaid: Number(resData.invoice?.amountPaid || 0),
         onlinePaymentReference: billingPaymentTiming === 'PAY_NOW' && billingPaymentMethod === 'ONLINE' ? billingOnlineReference.trim() : undefined,
-        settlementDate: billingPaymentTiming === 'PAY_NOW' ? new Date().toISOString() : undefined,
+        settlementDate: resData.invoice?.settlementDate || undefined,
       });
 
       setIsSubmittingBilling(false);
@@ -1775,6 +1794,10 @@ export default function TechnicianRepairsWorkbench() {
                                   <span className="px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
                                     <CheckCircle2 size={11} /> PAID
                                   </span>
+                                ) : job.billing?.paymentStatus === 'PARTIALLY_PAID' ? (
+                                  <span className="px-2.5 py-0.5 rounded-full font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30 flex items-center gap-1">
+                                    <Clock size={11} /> PARTIALLY PAID
+                                  </span>
                                 ) : (
                                   <span className="px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
                                     <Clock size={11} /> UNPAID ({job.billing?.paymentTiming === 'PAY_NOW' ? 'Pay Now Pending' : 'Pay After Repair'})
@@ -1810,6 +1833,24 @@ export default function TechnicianRepairsWorkbench() {
                                 </strong>
                               </div>
                             </div>
+
+                            {/* Amount Paid & Remaining Balance */}
+                            {(job.billing?.totalAmount || 0) > 0 && (
+                              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 space-y-1">
+                                  <span className="text-slate-500 font-sans block text-[11px]">Amount Paid:</span>
+                                  <strong className="text-sm font-bold text-cyan-300 block">
+                                    ₱{Number(job.billing?.amountPaid || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                  </strong>
+                                </div>
+                                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 space-y-1">
+                                  <span className="text-slate-500 font-sans block text-[11px]">Unpaid Balance:</span>
+                                  <strong className={`text-sm font-bold block ${Math.max(0, Number(job.billing?.totalAmount || 0) - Number(job.billing?.amountPaid || 0)) > 0 ? 'text-amber-300' : 'text-emerald-400'}`}>
+                                    ₱{Math.max(0, Number(job.billing?.totalAmount || 0) - Number(job.billing?.amountPaid || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                  </strong>
+                                </div>
+                              </div>
+                            )}
 
                             {/* Billing Actions */}
                             <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
@@ -2592,6 +2633,10 @@ export default function TechnicianRepairsWorkbench() {
                     <span className="text-emerald-400 bg-emerald-950/50 border-emerald-500/40 px-2.5 py-0.5 rounded-full">
                       ✓ PAID
                     </span>
+                  ) : invoiceViewData.paymentStatus === 'PARTIALLY_PAID' ? (
+                    <span className="text-orange-400 bg-orange-950/50 border-orange-500/40 px-2.5 py-0.5 rounded-full">
+                      ◐ PARTIALLY PAID
+                    </span>
                   ) : (
                     <span className="text-amber-400 bg-amber-950/50 border-amber-500/40 px-2.5 py-0.5 rounded-full">
                       ⏳ UNPAID
@@ -2678,10 +2723,19 @@ export default function TechnicianRepairsWorkbench() {
                 <strong className="text-2xl font-extrabold text-emerald-400 tracking-tight block">
                   ₱{Number(invoiceViewData.totalAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </strong>
-                {invoiceViewData.paymentStatus === 'PAID' && (
+                {invoiceViewData.paymentStatus === 'PAID' ? (
                   <span className="text-emerald-400 text-[11px] font-sans font-semibold block">
                     Amount Paid: ₱{Number(invoiceViewData.amountPaid || invoiceViewData.totalAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </span>
+                ) : (
+                  <>
+                    <span className="text-cyan-300 text-[11px] font-sans font-semibold block">
+                      Amount Paid: ₱{Number(invoiceViewData.amountPaid || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                    <span className="text-amber-300 text-[11px] font-sans font-semibold block">
+                      Unpaid Balance: ₱{Math.max(0, Number(invoiceViewData.totalAmount || 0) - Number(invoiceViewData.amountPaid || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </>
                 )}
               </div>
             </div>
@@ -2846,9 +2900,25 @@ export default function TechnicianRepairsWorkbench() {
                 <strong className="text-slate-200">{settlementModalTarget.deviceModel} (S/N: {settlementModalTarget.serialNumber})</strong>
               </div>
               <div className="flex justify-between items-center pt-2 border-t border-slate-800">
-                <span className="text-sm font-semibold text-slate-300">Total Amount Due:</span>
-                <span className="text-xl font-extrabold text-amber-400 font-mono">
+                <span className="text-sm font-semibold text-slate-300">Total Invoice Amount:</span>
+                <span className="text-sm font-bold text-slate-200 font-mono">
                   ₱{Number(settlementInvoiceData?.totalAmount || settlementModalTarget.billing?.totalAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Amount Already Paid:</span>
+                <span className="text-sm font-bold text-cyan-300 font-mono">
+                  ₱{Number(settlementInvoiceData ? settlementInvoiceData.amountPaid || 0 : settlementModalTarget.billing?.amountPaid || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex justify-between items-center pt-2 border-t border-slate-800">
+                <span className="text-sm font-semibold text-slate-300">Remaining Balance Due:</span>
+                <span className="text-xl font-extrabold text-amber-400 font-mono">
+                  ₱{Math.max(
+                    0,
+                    Number(settlementInvoiceData?.totalAmount || settlementModalTarget.billing?.totalAmount || 0) -
+                      Number(settlementInvoiceData ? settlementInvoiceData.amountPaid || 0 : settlementModalTarget.billing?.amountPaid || 0)
+                  ).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </span>
               </div>
             </div>

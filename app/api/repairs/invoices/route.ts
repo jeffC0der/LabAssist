@@ -441,6 +441,11 @@ export async function POST(request: Request) {
       }
     }
 
+    // Payment status reflects the amount actually received against the invoice total
+    if (resolvedAmountPaid > 0) {
+      resolvedPaymentStatus = resolvedAmountPaid >= totalAmount ? 'PAID' : 'PARTIALLY_PAID';
+    }
+
     const todayDate = new Date().toISOString().split('T')[0];
     const supabase = getSupabaseAdmin();
 

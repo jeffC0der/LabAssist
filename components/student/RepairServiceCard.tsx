@@ -1202,6 +1202,10 @@ export default function RepairServiceCard() {
                                     <span className="px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
                                       <CheckCircle2 size={11} /> PAID IN FULL
                                     </span>
+                                  ) : req.billing.paymentStatus === 'PARTIALLY_PAID' ? (
+                                    <span className="px-2.5 py-0.5 rounded-full font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30 flex items-center gap-1">
+                                      <Clock size={11} /> PARTIALLY PAID
+                                    </span>
                                   ) : (
                                     <span className="px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
                                       <Clock size={11} /> UNPAID ({req.billing.paymentTiming === 'PAY_NOW' ? 'Pay Now Pending' : 'Pay After Repair'})
@@ -1233,6 +1237,22 @@ export default function RepairServiceCard() {
                                       : req.billing.paymentStatus === 'PAID'
                                       ? 'Cash Settled'
                                       : 'Pending Settlement'}
+                                  </strong>
+                                </div>
+                              </div>
+
+                              {/* Amount Paid & Remaining Balance */}
+                              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
+                                  <span className="text-slate-500 font-sans block text-[10px]">Amount Paid:</span>
+                                  <strong className="text-cyan-300 font-bold text-sm block">
+                                    ₱{Number(req.billing.amountPaid || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                  </strong>
+                                </div>
+                                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
+                                  <span className="text-slate-500 font-sans block text-[10px]">Unpaid Balance:</span>
+                                  <strong className={`font-bold text-sm block ${Math.max(0, req.billing.totalAmount - Number(req.billing.amountPaid || 0)) > 0 ? 'text-amber-300' : 'text-emerald-400'}`}>
+                                    ₱{Math.max(0, req.billing.totalAmount - Number(req.billing.amountPaid || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                   </strong>
                                 </div>
                               </div>
@@ -1373,8 +1393,24 @@ export default function RepairServiceCard() {
               <div className="grid grid-cols-2 gap-3 text-xs font-mono">
                 <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
                   <span className="text-slate-400 font-sans block text-[10px]">Payment Status:</span>
-                  <strong className={customerInvoiceModalTarget.billing?.paymentStatus === 'PAID' ? 'text-emerald-400' : 'text-amber-400'}>
-                    {customerInvoiceModalTarget.billing?.paymentStatus === 'PAID' ? 'PAID IN FULL' : 'UNPAID'}
+                  <strong className={customerInvoiceModalTarget.billing?.paymentStatus === 'PAID' ? 'text-emerald-400' : customerInvoiceModalTarget.billing?.paymentStatus === 'PARTIALLY_PAID' ? 'text-orange-400' : 'text-amber-400'}>
+                    {customerInvoiceModalTarget.billing?.paymentStatus === 'PAID'
+                      ? 'PAID IN FULL'
+                      : customerInvoiceModalTarget.billing?.paymentStatus === 'PARTIALLY_PAID'
+                      ? 'PARTIALLY PAID'
+                      : 'UNPAID'}
+                  </strong>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                  <span className="text-slate-400 font-sans block text-[10px]">Amount Paid:</span>
+                  <strong className="text-cyan-300">
+                    ₱{Number(customerInvoiceModalTarget.billing?.amountPaid || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </strong>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                  <span className="text-slate-400 font-sans block text-[10px]">Unpaid Balance:</span>
+                  <strong className="text-amber-300">
+                    ₱{Math.max(0, Number(customerInvoiceModalTarget.billing?.totalAmount || 0) - Number(customerInvoiceModalTarget.billing?.amountPaid || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </strong>
                 </div>
                 <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">

@@ -641,13 +641,26 @@ export async function PATCH(request: Request) {
         );
       }
 
-      // Check payment requirement
-      const billingTotal = Number(totalAmount || currentExt.billing?.totalAmount || existingRecord?.total_amount || 0);
-      const isPaid = (paymentStatus === 'PAID' || currentExt.billing?.paymentStatus === 'PAID') || billingTotal === 0;
+      // Check payment requirement: the full invoice total must be received (partial payments are not enough)
+      let billingTotal = Number(totalAmount || currentExt.billing?.totalAmount || existingRecord?.total_amount || 0);
+      let billingPaid = Number(amountPaid ?? currentExt.billing?.amountPaid ?? existingRecord?.amount_paid ?? 0);
+      if (supabase) {
+        const { data: invRow } = await supabase
+          .from('repair_invoices')
+          .select('total_amount, amount_paid')
+          .eq('rma_number', rmaNumber)
+          .maybeSingle();
+        if (invRow) {
+          billingTotal = Number(invRow.total_amount || 0);
+          billingPaid = Number(invRow.amount_paid || 0);
+        }
+      }
+      const isPaid = billingTotal === 0 || billingPaid >= billingTotal;
 
       if (!isPaid) {
+        const balance = billingTotal - billingPaid;
         return NextResponse.json(
-          { error: 'Payment requirements have not been settled for this Job Order. Please settle payment before completing.' },
+          { error: `Payment requirements have not been settled for this Job Order. Remaining balance: ₱${balance.toFixed(2)}. Please settle payment before completing.` },
           { status: 400 }
         );
       }

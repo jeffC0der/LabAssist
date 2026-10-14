@@ -169,7 +169,11 @@ export async function sendInvoiceNotificationEmail(
       invoice.paymentStatus === 'PAID' ||
       invoice.paymentStatus?.toLowerCase() === 'paid' ||
       invoice.paymentStatus === 'Paid in Full';
-    const paymentStatusDisplay = isPaid ? 'Paid in Full' : 'Unpaid';
+    const paymentStatusDisplay = isPaid
+      ? 'Paid in Full'
+      : invoice.paymentStatus === 'PARTIALLY_PAID'
+      ? 'Partially Paid'
+      : 'Unpaid';
 
     let paymentMethodDisplay = 'N/A';
     if (invoice.paymentMethod) {
