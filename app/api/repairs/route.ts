@@ -108,12 +108,14 @@ const SEED_REPAIRS: any[] = [
   },
 ];
 
-// Convert DB row → frontend/API shape with full workflow attributes
-function rowToRepair(row: any) {
+// Convert DB row → frontend/API shape with full workflow attributes.
+// fromDatabase: the row was read from Supabase, so its embedded metadata is authoritative and the
+// per-instance in-memory store (stale on other serverless instances) must not override it.
+function rowToRepair(row: any, fromDatabase = false) {
   const rma = row.rma_number || row.job_order_number || row.request_number || row.id;
   const { cleanNotes, meta: dbMeta } = extractWorkflowMetadata(row.additional_inspection_notes);
-  const memExt = getExtendedRepair(rma);
-  const inMemoryInv = getInMemoryInvoice(rma);
+  const memExt = fromDatabase ? ({} as ReturnType<typeof getExtendedRepair>) : getExtendedRepair(rma);
+  const inMemoryInv = fromDatabase ? null : getInMemoryInvoice(rma);
 
   const ext = {
     ...dbMeta,
@@ -259,7 +261,7 @@ export async function GET() {
   if (!supabase) {
     return NextResponse.json(
       {
-        repairs: SEED_REPAIRS.map(rowToRepair),
+        repairs: SEED_REPAIRS.map((r) => rowToRepair(r)),
       },
       { headers: NO_CACHE_HEADERS }
     );
@@ -285,7 +287,7 @@ export async function GET() {
           .select('*')
           .order('created_at', { ascending: false });
         return NextResponse.json(
-          { repairs: (seeded || []).map(rowToRepair) },
+          { repairs: (seeded || []).map((r) => rowToRepair(r, true)) },
           { headers: NO_CACHE_HEADERS }
         );
       } catch (seedErr) {
@@ -295,7 +297,7 @@ export async function GET() {
     }
 
     return NextResponse.json(
-      { repairs: data.map(rowToRepair) },
+      { repairs: data.map((r) => rowToRepair(r, true)) },
       { headers: NO_CACHE_HEADERS }
     );
   } catch (err: any) {
@@ -581,8 +583,10 @@ export async function PATCH(request: Request) {
     }
 
     const { cleanNotes, meta: existingDbMeta } = extractWorkflowMetadata(existingRecord?.additional_inspection_notes);
-    const existingMem = getExtendedRepair(rmaNumber);
-    const inMemoryInv = getInMemoryInvoice(rmaNumber);
+    // With Supabase, the DB metadata is authoritative; the per-instance memory can be stale and
+    // would overwrite newer billing/evaluation data saved by another serverless instance.
+    const existingMem = supabase ? ({} as ReturnType<typeof getExtendedRepair>) : getExtendedRepair(rmaNumber);
+    const inMemoryInv = supabase ? null : getInMemoryInvoice(rmaNumber);
 
     const currentExt = {
       ...existingDbMeta,

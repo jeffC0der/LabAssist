@@ -732,6 +732,50 @@ CREATE POLICY "Technicians and Admins can update repair job cards"
   );
 
 -- ==============================================================================
+-- 18b. REPAIR INVOICES TABLE (Billing & Invoice records for device_repairs)
+-- One invoice per device repair Job Order, keyed by rma_number. Line items are
+-- stored with the invoice so the invoice and its items are always saved together.
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.repair_invoices (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  rma_number TEXT UNIQUE NOT NULL REFERENCES public.device_repairs(rma_number) ON DELETE CASCADE,
+  invoice_number TEXT UNIQUE NOT NULL,                      -- e.g. INV-01-2026-1014
+  issue_date DATE NOT NULL DEFAULT CURRENT_DATE,
+
+  -- Payment Terms & Status
+  payment_timing TEXT NOT NULL DEFAULT 'PAY_AFTER_REPAIR',  -- PAY_NOW | PAY_AFTER_REPAIR
+  payment_status TEXT NOT NULL DEFAULT 'UNPAID',            -- UNPAID | PAID
+  payment_method TEXT,                                      -- CASH | ONLINE
+
+  -- Client & Device Snapshot
+  client_name TEXT,
+  client_email TEXT,
+  device_model TEXT,
+  serial_number TEXT,
+  assigned_technician TEXT,
+
+  -- Monetary Figures & Settlement
+  total_amount NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+  amount_paid NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+  online_payment_reference TEXT,
+  settlement_date TIMESTAMPTZ,
+  billing_notes TEXT,
+
+  -- Line Items: [{ id, workScope, itemName, quantity, unitCost, totalCost }]
+  items JSONB NOT NULL DEFAULT '[]'::jsonb,
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.repair_invoices ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Repair invoices viewable by authenticated users" ON public.repair_invoices;
+CREATE POLICY "Repair invoices viewable by authenticated users"
+  ON public.repair_invoices FOR SELECT
+  USING (true);
+
+-- ==============================================================================
 -- 19. INDEXES & REALTIME PUBLICATION
 -- ==============================================================================
 CREATE INDEX IF NOT EXISTS idx_repair_requests_user ON public.repair_requests(user_id);

@@ -140,7 +140,7 @@ async function generateInvoiceNumber(supabase: any, targetDate: Date = new Date(
     try {
       const suffix = `-${year}-${mmdd}`;
       const { data: rows, error } = await supabase
-        .from('invoices')
+        .from('repair_invoices')
         .select('invoice_number')
         .like('invoice_number', `INV-%${suffix}`);
 
@@ -167,6 +167,31 @@ async function generateInvoiceNumber(supabase: any, targetDate: Date = new Date(
   return `INV-${queueStr}-${year}-${mmdd}`;
 }
 
+// Convert a repair_invoices DB row → frontend invoice shape
+function repairInvoiceRowToInvoice(row: any) {
+  return {
+    id: row.id,
+    invoiceNumber: row.invoice_number,
+    jobOrderId: row.rma_number,
+    jobOrderNumber: row.rma_number,
+    issueDate: row.issue_date,
+    paymentTiming: row.payment_timing,
+    paymentStatus: row.payment_status,
+    paymentMethod: row.payment_method,
+    clientName: row.client_name,
+    clientEmail: row.client_email,
+    deviceModel: row.device_model,
+    serialNumber: row.serial_number,
+    assignedTechnician: row.assigned_technician,
+    totalAmount: Number(row.total_amount || 0),
+    amountPaid: Number(row.amount_paid || 0),
+    onlinePaymentReference: row.online_payment_reference,
+    settlementDate: row.settlement_date,
+    billingNotes: row.billing_notes,
+    items: Array.isArray(row.items) ? row.items : [],
+  };
+}
+
 // ── GET: Fetch invoice and invoice items for a Job Order ──
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -184,6 +209,22 @@ export async function GET(request: Request) {
   }
 
   try {
+    // Dedicated repair_invoices table is the source of truth for device repair invoices.
+    // (The in-memory cache below is per serverless instance and made invoices appear/disappear.)
+    if (jobOrderNumber) {
+      const { data: invRow, error: invErr } = await supabase
+        .from('repair_invoices')
+        .select('*')
+        .eq('rma_number', jobOrderNumber)
+        .maybeSingle();
+
+      if (!invErr) {
+        const invoice = invRow ? repairInvoiceRowToInvoice(invRow) : null;
+        return NextResponse.json({ invoice, items: invoice?.items || [] });
+      }
+      console.warn('repair_invoices query error:', invErr.message);
+    }
+
     let query = supabase.from('invoices').select('*, invoice_items(*), job_orders(*, repair_requests(*))');
     
     if (jobOrderId) {
@@ -467,6 +508,18 @@ export async function POST(request: Request) {
       }
     }
 
+    // Preserve the invoice number already saved in repair_invoices for this Job Order
+    if (supabase) {
+      const { data: existingRepairInv } = await supabase
+        .from('repair_invoices')
+        .select('invoice_number')
+        .eq('rma_number', joNum)
+        .maybeSingle();
+      if (existingRepairInv?.invoice_number) {
+        invoiceNumber = existingRepairInv.invoice_number;
+      }
+    }
+
     // If no existing invoice number found, generate a fresh sequential INV-[QUEUE]-[YEAR]-[MMDD]
     if (!invoiceNumber) {
       invoiceNumber = await generateInvoiceNumber(supabase, new Date());
@@ -493,6 +546,46 @@ export async function POST(request: Request) {
       billingNotes: billingNotes || null,
       items: calculatedItems,
     };
+
+    // Persist invoice + line items to the dedicated repair_invoices table
+    if (supabase) {
+      const { data: savedInv, error: invSaveErr } = await supabase
+        .from('repair_invoices')
+        .upsert(
+          {
+            rma_number: joNum,
+            invoice_number: invoiceNumber,
+            issue_date: todayDate,
+            payment_timing: paymentTiming,
+            payment_status: resolvedPaymentStatus,
+            payment_method: resolvedPaymentMethod,
+            client_name: resolvedClientName,
+            client_email: resolvedEmail,
+            device_model: resolvedDevice,
+            serial_number: resolvedSerial,
+            assigned_technician: resolvedTechnician,
+            total_amount: totalAmount,
+            amount_paid: resolvedAmountPaid,
+            online_payment_reference: resolvedReference,
+            settlement_date: formattedInvoice.settlementDate,
+            billing_notes: billingNotes || null,
+            items: calculatedItems,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'rma_number' }
+        )
+        .select('id')
+        .single();
+
+      if (invSaveErr) {
+        console.error('[Invoices POST] repair_invoices save failed:', invSaveErr.message);
+        return NextResponse.json(
+          { error: `Invoice could not be saved: ${invSaveErr.message}` },
+          { status: 500 }
+        );
+      }
+      if (savedInv?.id) formattedInvoice.id = savedInv.id;
+    }
 
     // Store in global in-memory cache and sync to extended repair store
     inMemoryInvoices[joNum] = formattedInvoice;
