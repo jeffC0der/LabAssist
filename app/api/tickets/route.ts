@@ -98,19 +98,8 @@ export async function GET() {
       return NextResponse.json({ tickets: MOCK_TICKETS });
     }
 
-    // If table is empty, seed with default mock tickets
-    if (!data || data.length === 0) {
-      try {
-        const rowsToInsert = MOCK_TICKETS.map(ticketToRow);
-        await supabase.from('tickets').insert(rowsToInsert);
-        return NextResponse.json({ tickets: MOCK_TICKETS });
-      } catch (seedErr) {
-        console.warn('Failed to auto-seed tickets table:', seedErr);
-        return NextResponse.json({ tickets: MOCK_TICKETS });
-      }
-    }
-
-    const tickets: Ticket[] = data.map(rowToTicket);
+    // Never seed placeholder tickets into the database: an empty table means no incidents yet
+    const tickets: Ticket[] = (data || []).map(rowToTicket);
     return NextResponse.json({ tickets });
   } catch (err: any) {
     console.error('Error fetching tickets:', err);

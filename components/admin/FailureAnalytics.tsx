@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   BarChart3,
   TrendingDown,
@@ -8,20 +8,11 @@ import {
   ShieldAlert,
   Cpu,
   AlertOctagon,
-  CheckCircle2,
   RefreshCw,
   Sparkles,
 } from 'lucide-react';
-import { useTickets } from '@/context/TicketContext';
-import { useWorkstations } from '@/context/WorkstationContext';
-
-const LAB_NAME_MAP: Record<string, string> = {
-  'LAB-101': 'LAB-101 (Embedded Systems)',
-  'LAB-102': 'LAB-102 (Intro Computing)',
-  'LAB-103': 'LAB-103 (Digital Logic)',
-  'LAB-104': 'LAB-104 (Microcontrollers)',
-  'LAB-105': 'LAB-105 (AI & Studio)',
-};
+import { supabase } from '@/lib/supabaseClient';
+import type { FailureIncident, FailureLab, FailureStation } from '@/app/api/admin/failure-analytics/route';
 
 const DOMAIN_DEFINITIONS = [
   {
@@ -54,200 +45,184 @@ const DOMAIN_DEFINITIONS = [
   },
 ];
 
-const TIME_SLOTS = [
-  { time: '08:00', minHour: 7, maxHour: 8 },
-  { time: '10:00', minHour: 9, maxHour: 10 },
-  { time: '12:00', minHour: 11, maxHour: 12 },
-  { time: '14:00', minHour: 13, maxHour: 14 },
-  { time: '16:00', minHour: 15, maxHour: 16 },
-  { time: '18:00', minHour: 17, maxHour: 18 },
-  { time: '20:00', minHour: 19, maxHour: 23 },
+// Two-hour fault windows shared by the Peak Fault Window card and the time-of-day histogram.
+// The first and last windows also absorb early-morning and late-night reports.
+const TIME_WINDOWS = [
+  { time: '08:00', label: '08:00 – 10:00' },
+  { time: '10:00', label: '10:00 – 12:00' },
+  { time: '12:00', label: '12:00 – 14:00' },
+  { time: '14:00', label: '14:00 – 16:00' },
+  { time: '16:00', label: '16:00 – 18:00' },
+  { time: '18:00', label: '18:00 – 20:00' },
+  { time: '20:00', label: '20:00 – 22:00' },
 ];
 
+function windowIndex(hour: number) {
+  return Math.min(TIME_WINDOWS.length - 1, Math.max(0, Math.floor((hour - 8) / 2)));
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const RANGE_MS = { TODAY: DAY_MS, WEEK: 7 * DAY_MS, MONTH: 30 * DAY_MS, ALL: Infinity } as const;
+
+function formatMinutes(mins: number) {
+  if (mins >= 1440) return `${(mins / 1440).toFixed(1)} days`;
+  if (mins >= 60) return `${(mins / 60).toFixed(1)} hrs`;
+  return `${mins.toFixed(1)} mins`;
+}
+
+function averageResolutionMinutes(list: FailureIncident[]) {
+  const resolved = list.filter((t) => t.status === 'RESOLVED' && t.resolvedAt && t.createdAt);
+  if (resolved.length === 0) return { avg: 0, count: 0 };
+  const sum = resolved.reduce((acc, t) => {
+    const start = new Date(t.createdAt).getTime();
+    const end = new Date(t.resolvedAt!).getTime();
+    return acc + Math.max(0, (end - start) / 60000);
+  }, 0);
+  return { avg: sum / resolved.length, count: resolved.length };
+}
+
 export default function FailureAnalytics() {
-  const { tickets, isLoading: isTicketsLoading, refreshTickets } = useTickets();
-  const { workstations } = useWorkstations();
+  const [incidents, setIncidents] = useState<FailureIncident[]>([]);
+  const [labs, setLabs] = useState<FailureLab[]>([]);
+  const [stations, setStations] = useState<FailureStation[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'TODAY' | 'WEEK' | 'MONTH' | 'ALL'>('WEEK');
 
-  // 1. Filter tickets by timeRange
+  const loadAnalytics = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/admin/failure-analytics', { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load failure analytics');
+      setIncidents(data.incidents || []);
+      setLabs(data.labs || []);
+      setStations(data.stations || []);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message || 'Error fetching failure analytics');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAnalytics();
+  }, [loadAnalytics]);
+
+  // Reload whenever tickets or workstation statuses change in the database
+  useEffect(() => {
+    try {
+      const channel = supabase
+        .channel('admin:failure-analytics')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, () => loadAnalytics())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'workstations' }, () => loadAnalytics())
+        .subscribe();
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    } catch (err) {
+      console.warn('Could not establish failure analytics realtime channel:', err);
+    }
+  }, [loadAnalytics]);
+
+  // 1. Filter incidents by timeRange (current period and the equal-length period before it)
   const { activeTickets, prevPeriodTickets } = useMemo(() => {
+    if (timeRange === 'ALL') return { activeTickets: incidents, prevPeriodTickets: [] as FailureIncident[] };
     const now = Date.now();
-    let durationMs = 7 * 24 * 60 * 60 * 1000;
-    if (timeRange === 'TODAY') durationMs = 24 * 60 * 60 * 1000;
-    else if (timeRange === 'WEEK') durationMs = 7 * 24 * 60 * 60 * 1000;
-    else if (timeRange === 'MONTH') durationMs = 30 * 24 * 60 * 60 * 1000;
-    else if (timeRange === 'ALL') durationMs = Infinity;
+    const durationMs = RANGE_MS[timeRange];
+    const age = (t: FailureIncident) => now - new Date(t.createdAt).getTime();
 
-    const filtered = tickets.filter((t) => {
-      if (timeRange === 'ALL') return true;
-      const tTime = new Date(t.timestamp).getTime();
-      return !isNaN(tTime) && now - tTime <= durationMs;
-    });
-
-    const prevFiltered = tickets.filter((t) => {
-      if (timeRange === 'ALL') return false;
-      const tTime = new Date(t.timestamp).getTime();
-      return !isNaN(tTime) && now - tTime > durationMs && now - tTime <= durationMs * 2;
-    });
-
-    // Fallback gracefully if database has tickets but none in narrow slice
-    const selected = filtered.length > 0 || timeRange === 'ALL' ? filtered : tickets;
-    return { activeTickets: selected, prevPeriodTickets: prevFiltered };
-  }, [tickets, timeRange]);
+    return {
+      activeTickets: incidents.filter((t) => age(t) <= durationMs),
+      prevPeriodTickets: incidents.filter((t) => age(t) > durationMs && age(t) <= durationMs * 2),
+    };
+  }, [incidents, timeRange]);
 
   // 2. Mean Time to Resolution (MTTR) calculation
   const { mttrDisplay, mttrTrend } = useMemo(() => {
-    const resolved = activeTickets.filter(
-      (t) => t.status === 'RESOLVED' && t.resolvedAt && t.timestamp
-    );
-
-    if (resolved.length === 0) {
-      // Check if there are any all-time resolved tickets
-      const allResolved = tickets.filter(
-        (t) => t.status === 'RESOLVED' && t.resolvedAt && t.timestamp
-      );
-      if (allResolved.length > 0) {
-        const sum = allResolved.reduce((acc, t) => {
-          const start = new Date(t.timestamp).getTime();
-          const end = new Date(t.resolvedAt!).getTime();
-          return acc + Math.max(0, (end - start) / 60000);
-        }, 0);
-        const avg = sum / allResolved.length;
-        return {
-          mttrDisplay: avg >= 60 ? `${(avg / 60).toFixed(1)} hrs` : `${avg.toFixed(1)} mins`,
-          mttrTrend: { text: `Based on ${allResolved.length} all-time resolved tickets`, isFaster: true },
-        };
-      }
+    const current = averageResolutionMinutes(activeTickets);
+    if (current.count === 0) {
       return {
-        mttrDisplay: '0.0 mins',
-        mttrTrend: { text: 'No resolved tickets logged yet', isFaster: true },
+        mttrDisplay: '—',
+        mttrTrend: { text: 'No resolved incidents in this period', isFaster: true },
       };
     }
 
-    const currentSum = resolved.reduce((acc, t) => {
-      const start = new Date(t.timestamp).getTime();
-      const end = new Date(t.resolvedAt!).getTime();
-      return acc + Math.max(0, (end - start) / 60000);
-    }, 0);
-    const currentAvg = currentSum / resolved.length;
-
-    // Previous period resolved
-    const prevResolved = prevPeriodTickets.filter(
-      (t) => t.status === 'RESOLVED' && t.resolvedAt && t.timestamp
-    );
-
     let trendObj = {
-      text: `${resolved.length} tickets resolved in period`,
+      text: `Based on ${current.count} resolved incident${current.count !== 1 ? 's' : ''}`,
       isFaster: true,
     };
 
-    if (prevResolved.length > 0) {
-      const prevSum = prevResolved.reduce((acc, t) => {
-        const start = new Date(t.timestamp).getTime();
-        const end = new Date(t.resolvedAt!).getTime();
-        return acc + Math.max(0, (end - start) / 60000);
-      }, 0);
-      const prevAvg = prevSum / prevResolved.length;
-
-      if (prevAvg > 0) {
-        const delta = ((currentAvg - prevAvg) / prevAvg) * 100;
-        const isFaster = delta <= 0;
-        trendObj = {
-          text: `${Math.abs(delta).toFixed(1)}% ${isFaster ? 'faster' : 'slower'} vs last period`,
-          isFaster,
-        };
-      }
-    }
-
-    return {
-      mttrDisplay: currentAvg >= 60 ? `${(currentAvg / 60).toFixed(1)} hrs` : `${currentAvg.toFixed(1)} mins`,
-      mttrTrend: trendObj,
-    };
-  }, [activeTickets, prevPeriodTickets, tickets]);
-
-  // 3. Peak Fault Window calculation
-  const { peakWindowDisplay, peakWindowDetail } = useMemo(() => {
-    if (activeTickets.length === 0) {
-      return {
-        peakWindowDisplay: '08:00 – 10:00',
-        peakWindowDetail: 'No incidents logged in window',
+    const prev = averageResolutionMinutes(prevPeriodTickets);
+    if (prev.count > 0 && prev.avg > 0) {
+      const delta = ((current.avg - prev.avg) / prev.avg) * 100;
+      const isFaster = delta <= 0;
+      trendObj = {
+        text: `${Math.abs(delta).toFixed(1)}% ${isFaster ? 'faster' : 'slower'} vs last period`,
+        isFaster,
       };
     }
 
-    // Windows of 2 hours: 08-10, 10-12, 12-14, 14-16, 16-18, 18-20, 20-22
-    const windows: Record<string, { count: number; labCounts: Record<string, number> }> = {
-      '08:00 – 10:00': { count: 0, labCounts: {} },
-      '10:00 – 12:00': { count: 0, labCounts: {} },
-      '12:00 – 14:00': { count: 0, labCounts: {} },
-      '14:00 – 16:00': { count: 0, labCounts: {} },
-      '16:00 – 18:00': { count: 0, labCounts: {} },
-      '18:00 – 20:00': { count: 0, labCounts: {} },
-      '20:00 – 22:00': { count: 0, labCounts: {} },
-    };
+    return { mttrDisplay: formatMinutes(current.avg), mttrTrend: trendObj };
+  }, [activeTickets, prevPeriodTickets]);
 
+  // Incidents bucketed into the shared time-of-day windows
+  const windowBuckets = useMemo(() => {
+    const buckets = TIME_WINDOWS.map(() => ({ count: 0, labCounts: {} as Record<string, number> }));
     activeTickets.forEach((t) => {
-      const d = new Date(t.timestamp);
-      const hour = isNaN(d.getTime()) ? 14 : d.getHours();
-      let key = '14:00 – 16:00';
-
-      if (hour < 10) key = '08:00 – 10:00';
-      else if (hour < 12) key = '10:00 – 12:00';
-      else if (hour < 14) key = '12:00 – 14:00';
-      else if (hour < 16) key = '14:00 – 16:00';
-      else if (hour < 18) key = '16:00 – 18:00';
-      else if (hour < 20) key = '18:00 – 20:00';
-      else key = '20:00 – 22:00';
-
-      windows[key].count++;
-      windows[key].labCounts[t.lab_id] = (windows[key].labCounts[t.lab_id] || 0) + 1;
+      const d = new Date(t.createdAt);
+      if (isNaN(d.getTime())) return;
+      const b = buckets[windowIndex(d.getHours())];
+      b.count++;
+      b.labCounts[t.labId] = (b.labCounts[t.labId] || 0) + 1;
     });
-
-    let bestWindow = '14:00 – 16:00';
-    let maxCount = -1;
-
-    Object.entries(windows).forEach(([win, data]) => {
-      if (data.count > maxCount) {
-        maxCount = data.count;
-        bestWindow = win;
-      }
-    });
-
-    // Determine top lab in peak window
-    const topLabEntry = Object.entries(windows[bestWindow].labCounts).sort((a, b) => b[1] - a[1])[0];
-    const topLabName = topLabEntry ? topLabEntry[0] : 'Campus Labs';
-    const detail =
-      maxCount > 0
-        ? `${topLabName} (${maxCount} incident${maxCount > 1 ? 's' : ''} recorded)`
-        : 'Normal operational load';
-
-    return { peakWindowDisplay: bestWindow, peakWindowDetail: detail };
+    return buckets;
   }, [activeTickets]);
 
-  // 4. Fleet Availability Index calculation
+  // 3. Peak Fault Window calculation
+  const { peakWindowDisplay, peakWindowDetail } = useMemo(() => {
+    let peakIdx = -1;
+    windowBuckets.forEach((b, i) => {
+      if (b.count > 0 && (peakIdx < 0 || b.count > windowBuckets[peakIdx].count)) peakIdx = i;
+    });
+
+    if (peakIdx < 0) {
+      return { peakWindowDisplay: '—', peakWindowDetail: 'No incidents logged in this period' };
+    }
+
+    const peak = windowBuckets[peakIdx];
+    const topLab = Object.entries(peak.labCounts).sort((a, b) => b[1] - a[1])[0];
+    return {
+      peakWindowDisplay: TIME_WINDOWS[peakIdx].label,
+      peakWindowDetail: `${topLab[0]} (${peak.count} incident${peak.count > 1 ? 's' : ''} recorded)`,
+    };
+  }, [windowBuckets]);
+
+  // 4. Fleet Availability Index calculation (current workstation statuses)
   const { fleetAvailabilityPct, fleetStatusDetail } = useMemo(() => {
-    const allStations = Object.values(workstations).flat();
-    const totalStations = allStations.length || 98;
-    const faultyCount = allStations.filter((s) => s.status === 'UNDER_REPAIR' || s.status === 'ISSUE_REPORTED').length;
-    const readyCount = Math.max(0, totalStations - faultyCount);
-    const pct = totalStations > 0 ? ((readyCount / totalStations) * 100).toFixed(1) : '100.0';
+    const totalStations = stations.length;
+    if (totalStations === 0) {
+      return { fleetAvailabilityPct: '—', fleetStatusDetail: 'No workstation records in database' };
+    }
+    const faultyCount = stations.filter((s) => s.status === 'UNDER_REPAIR' || s.status === 'ISSUE_REPORTED').length;
+    const readyCount = totalStations - faultyCount;
 
     return {
-      fleetAvailabilityPct: `${pct}%`,
+      fleetAvailabilityPct: `${((readyCount / totalStations) * 100).toFixed(1)}%`,
       fleetStatusDetail: `${readyCount} of ${totalStations} workstations operational`,
     };
-  }, [workstations]);
+  }, [stations]);
 
-  // 5. Total Failures / Dispatch Rate
+  // 5. Total Failures / Dispatch Rate (any ticket past PENDING has had a technician dispatched)
   const { totalFailuresCount, dispatchRateDetail } = useMemo(() => {
     const count = activeTickets.length;
-    const dispatchedOrResolved = activeTickets.filter(
-      (t) => t.status === 'DISPATCHED' || t.status === 'RESOLVED'
-    ).length;
-    const rate = count > 0 ? ((dispatchedOrResolved / count) * 100).toFixed(1) : '100.0';
+    if (count === 0) return { totalFailuresCount: 0, dispatchRateDetail: 'No incidents to dispatch' };
+    const dispatched = activeTickets.filter((t) => t.status !== 'PENDING').length;
 
     return {
       totalFailuresCount: count,
-      dispatchRateDetail: `${rate}% technician dispatch rate`,
+      dispatchRateDetail: `${((dispatched / count) * 100).toFixed(1)}% technician dispatch rate`,
     };
   }, [activeTickets]);
 
@@ -265,19 +240,18 @@ export default function FailureAnalytics() {
     }).sort((a, b) => b.count - a.count);
   }, [activeTickets]);
 
-  // 7. Lab Room Failure Density
+  // 7. Lab Room Failure Density (every lab in the labs table, plus any lab code found only on tickets)
   const labDensity = useMemo(() => {
     const total = activeTickets.length || 1;
-    const counts: Record<string, number> = {
-      'LAB-101': 0,
-      'LAB-102': 0,
-      'LAB-103': 0,
-      'LAB-104': 0,
-      'LAB-105': 0,
-    };
+    const labNames: Record<string, string> = {};
+    const counts: Record<string, number> = {};
+    labs.forEach((l) => {
+      labNames[l.code] = l.name;
+      counts[l.code] = 0;
+    });
 
     activeTickets.forEach((t) => {
-      counts[t.lab_id] = (counts[t.lab_id] || 0) + 1;
+      counts[t.labId] = (counts[t.labId] || 0) + 1;
     });
 
     return Object.entries(counts)
@@ -289,48 +263,39 @@ export default function FailureAnalytics() {
         else if (count === 0) load = 'Optimal (0 Faults)';
 
         return {
-          room: LAB_NAME_MAP[roomCode] || roomCode,
+          room: labNames[roomCode] ? `${roomCode} (${labNames[roomCode]})` : roomCode,
           code: roomCode,
           count,
           pct,
           load,
         };
       })
-      .sort((a, b) => b.count - a.count);
-  }, [activeTickets]);
+      .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
+  }, [activeTickets, labs]);
 
   // 8. Time of Day Peak Distribution Histogram
   const { hourlyPeakData, peakHourLabel } = useMemo(() => {
-    const slotCounts = TIME_SLOTS.map((slot) => {
-      const faults = activeTickets.filter((t) => {
-        const d = new Date(t.timestamp);
-        if (isNaN(d.getTime())) return false;
-        const h = d.getHours();
-        return h >= slot.minHour && h <= slot.maxHour;
-      }).length;
-      return { time: slot.time, faults };
+    const maxFaults = Math.max(1, ...windowBuckets.map((b) => b.count));
+
+    let peakIdx = 0;
+    windowBuckets.forEach((b, i) => {
+      if (b.count > windowBuckets[peakIdx].count) peakIdx = i;
     });
+    const peakFaults = windowBuckets[peakIdx].count;
 
-    const maxFaults = Math.max(1, ...slotCounts.map((s) => s.faults));
-
-    let peakSlot = slotCounts[0];
-    slotCounts.forEach((s) => {
-      if (s.faults > peakSlot.faults) peakSlot = s;
-    });
-
-    const hourlyData = slotCounts.map((s) => ({
-      time: s.time,
-      faults: s.faults,
-      load: s.faults > 0 ? Math.max(14, Math.round((s.faults / maxFaults) * 100)) : 8,
+    const hourlyData = windowBuckets.map((b, i) => ({
+      time: TIME_WINDOWS[i].time,
+      faults: b.count,
+      load: b.count > 0 ? Math.max(14, Math.round((b.count / maxFaults) * 100)) : 8,
     }));
 
     const peakLabel =
-      peakSlot.faults > 0
-        ? `Peak at ${peakSlot.time} (${peakSlot.faults} ticket${peakSlot.faults > 1 ? 's' : ''})`
-        : 'Even load distribution';
+      peakFaults > 0
+        ? `Peak at ${TIME_WINDOWS[peakIdx].time} (${peakFaults} ticket${peakFaults > 1 ? 's' : ''})`
+        : 'No incidents in this period';
 
     return { hourlyPeakData: hourlyData, peakHourLabel: peakLabel };
-  }, [activeTickets]);
+  }, [windowBuckets]);
 
   return (
     <div className="glass rounded-2xl p-5 border border-slate-800/80 space-y-6">
@@ -343,9 +308,15 @@ export default function FailureAnalytics() {
           <div>
             <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
               Failure Analytics & Incident Metrics
-              <span className="px-2 py-0.5 text-[10px] uppercase font-mono font-bold tracking-wider rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                <Sparkles size={10} /> Live Supabase Data
-              </span>
+              {error ? (
+                <span className="px-2 py-0.5 text-[10px] uppercase font-mono font-bold tracking-wider rounded-md bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                  Database Unavailable
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 text-[10px] uppercase font-mono font-bold tracking-wider rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                  <Sparkles size={10} /> Live Supabase Data
+                </span>
+              )}
             </h2>
             <p className="text-xs text-slate-400">
               Campus hardware reliability breakdown, MTTR metrics, & fault distribution patterns
@@ -357,11 +328,11 @@ export default function FailureAnalytics() {
         <div className="flex items-center gap-2 self-start sm:self-auto">
           <button
             type="button"
-            onClick={() => refreshTickets()}
+            onClick={() => loadAnalytics()}
             className="p-1.5 rounded-xl bg-slate-900/60 border border-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
             title="Refresh analytics data"
           >
-            <RefreshCw size={13} className={isTicketsLoading ? 'animate-spin text-indigo-400' : ''} />
+            <RefreshCw size={13} className={isLoading ? 'animate-spin text-indigo-400' : ''} />
           </button>
 
           <div className="flex items-center gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800">
@@ -382,6 +353,12 @@ export default function FailureAnalytics() {
           </div>
         </div>
       </div>
+
+      {error && (
+        <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300">
+          Could not load incident data from the database: {error}
+        </div>
+      )}
 
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
