@@ -147,10 +147,14 @@ function rowToRepair(row: any) {
     },
   };
 
-  // Resolve status: prefer embedded workflow metadata status, otherwise fallback to DB column
-  let resolvedStatus = ext.status || row.status || row.request_status || 'RECEIVED';
-  if (row.status === 'CANCELLED' || row.status === 'COMPLETED' || row.status === 'READY_FOR_PICKUP') {
-    resolvedStatus = row.status;
+  // Resolve status from the persisted DB column. It is the source of truth across serverless
+  // instances; the in-memory store is per-instance and can hold a stale status (e.g. RECEIVED
+  // after the job was confirmed on another instance), which made jobs flip between tabs.
+  let resolvedStatus = row.status || row.request_status || ext.status || 'RECEIVED';
+  // UNDER_EVALUATION is stored in the column as PENDING_EVALUATION; restore it from metadata
+  const metaStatus = dbMeta.status || memExt.status;
+  if (resolvedStatus === 'PENDING_EVALUATION' && metaStatus === 'UNDER_EVALUATION') {
+    resolvedStatus = 'UNDER_EVALUATION';
   }
   const isConfirmed = !['RECEIVED', 'PENDING_EVALUATION', 'UNDER_EVALUATION', 'EVALUATED'].includes(resolvedStatus);
 
