@@ -20,6 +20,7 @@ export default function TechnicianDispatchModal({
 }: TechnicianDispatchModalProps) {
   const [technicians, setTechnicians] = useState<AvailableTechnician[]>([]);
   const [isLoadingTechs, setIsLoadingTechs] = useState<boolean>(true);
+  const [techLoadError, setTechLoadError] = useState<string | null>(null);
   const [selectedTechId, setSelectedTechId] = useState<string>('');
   const [dispatchNote, setDispatchNote] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -32,12 +33,14 @@ export default function TechnicianDispatchModal({
 
     let isMounted = true;
     setIsLoadingTechs(true);
+    setTechLoadError(null);
 
     fetch('/api/technicians', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         if (!isMounted) return;
         const list: AvailableTechnician[] = data.technicians || [];
+        if (data.error) setTechLoadError(data.error);
         setTechnicians(list);
         if (list.length > 0 && !selectedTechId) {
           // Default select the technician with the least active tickets
@@ -47,6 +50,7 @@ export default function TechnicianDispatchModal({
       })
       .catch((err) => {
         console.warn('Error fetching technicians for dispatch modal:', err);
+        if (isMounted) setTechLoadError('Could not reach the technician registry');
       })
       .finally(() => {
         if (isMounted) setIsLoadingTechs(false);
@@ -155,7 +159,7 @@ export default function TechnicianDispatchModal({
               </div>
             ) : technicians.length === 0 ? (
               <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700 text-center text-xs text-slate-400">
-                No technicians registered in the database yet.
+                {techLoadError ? `Could not load technicians: ${techLoadError}` : 'No technician accounts registered in the database yet.'}
               </div>
             ) : (
               <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
