@@ -102,7 +102,8 @@ export default function RevenueAnalytics() {
   const [newAmount, setNewAmount] = useState('');
   const [newMethod, setNewMethod] = useState<'CASH' | 'GCASH' | 'MAYA' | 'BANK_TRANSFER'>('GCASH');
   const [newStatus, setNewStatus] = useState<'PAID' | 'UNPAID'>('PAID');
-  const [newTechnician, setNewTechnician] = useState('Tech. Carlos Rivera');
+  const [newTechnician, setNewTechnician] = useState('Unassigned');
+  const [technicianOptions, setTechnicianOptions] = useState<string[]>([]);
   const [newJobOrder, setNewJobOrder] = useState('');
   const [newReference, setNewReference] = useState('');
   const [newNotes, setNewNotes] = useState('');
@@ -119,6 +120,7 @@ export default function RevenueAnalytics() {
       setTechnicians(data.technicianPerformance || []);
       setCharts(data.charts || { daily: [], weekly: [], monthly: [] });
       setTransactions(data.transactions || []);
+      setTechnicianOptions(data.technicianOptions || []);
       setMeta(data.meta || null);
     } catch (err: any) {
       setError(err.message || 'Error fetching revenue information');
@@ -661,8 +663,8 @@ export default function RevenueAnalytics() {
                         {tx.referenceNumber && ` (${tx.referenceNumber.slice(-4)})`}
                       </span>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-right font-mono font-black text-emerald-400">
-                      {fmtMoney(tx.amount)}
+                    <td className={`px-4 py-3 whitespace-nowrap text-right font-mono font-black ${tx.paymentStatus === 'REFUNDED' ? 'text-rose-400' : 'text-emerald-400'}`}>
+                      {tx.paymentStatus === 'REFUNDED' ? '−' : ''}{fmtMoney(tx.amount)}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-center">
                       <span
@@ -826,11 +828,10 @@ export default function RevenueAnalytics() {
                     onChange={(e) => setNewTechnician(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 focus:border-emerald-500 focus:outline-none"
                   >
-                    <option value="Tech. Carlos Rivera">Tech. Carlos Rivera</option>
-                    <option value="Tech. Maria Santos">Tech. Maria Santos</option>
-                    <option value="Tech. Cruz">Tech. Cruz</option>
-                    <option value="Tech. Garcia">Tech. Garcia</option>
-                    <option value="Tech. Lim">Tech. Lim</option>
+                    <option value="Unassigned">Unassigned</option>
+                    {technicianOptions.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
                   </select>
                 </div>
                 <div>

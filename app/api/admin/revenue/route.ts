@@ -55,104 +55,93 @@ function rowToPayment(row: any): PaymentRecord {
 export async function GET(request: Request) {
   const supabase = getSupabaseAdmin();
   const payments: PaymentRecord[] = [];
-  const seenIds = new Set<string>();
+
+  // Outstanding balances from saved repair invoices (cancelled Job Orders excluded)
+  const outstandingBalances: number[] = [];
+  // Registered technician names for the Record Payment form
+  const technicianOptions: string[] = [];
 
   if (supabase) {
-    // 1. Query dedicated public.payments table in Supabase
+    try {
+      const { data: techRows } = await supabase
+        .from('profiles')
+        .select('name')
+        .eq('role', 'TECHNICIAN')
+        .order('name', { ascending: true });
+      (techRows || []).forEach((t: any) => {
+        if (t.name && !technicianOptions.includes(t.name)) technicianOptions.push(t.name);
+      });
+    } catch (err) {
+      console.warn('Supabase technician profiles fetch error:', err);
+    }
+
+    // 1. Payments ledger: every amount received from clients (recorded automatically on billing/settlement)
     try {
       const { data: payRows, error: payErr } = await supabase
         .from('payments')
         .select('*')
         .order('payment_date', { ascending: false });
 
-      if (!payErr && payRows && payRows.length > 0) {
-        payRows.forEach((r) => {
-          const item = rowToPayment(r);
-          payments.push(item);
-          seenIds.add(item.paymentNumber);
-          if (item.id) seenIds.add(item.id);
-        });
+      if (payErr) {
+        console.warn('Supabase payments table fetch error:', payErr.message);
+      } else {
+        (payRows || []).forEach((r) => payments.push(rowToPayment(r)));
       }
     } catch (err) {
       console.warn('Supabase payments table fetch error:', err);
     }
 
-    // 2. Query tickets in Supabase for any billing records stored inside notes or description
+    // 2. Unpaid balances: invoice total minus amount paid for every repair invoice
     try {
-      const { data: ticketRows, error: tickErr } = await supabase
-        .from('tickets')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const { data: invRows, error: invErr } = await supabase
+        .from('repair_invoices')
+        .select('rma_number, total_amount, amount_paid');
 
-      if (!tickErr && ticketRows && ticketRows.length > 0) {
-        ticketRows.forEach((t: any) => {
-          const raw = `${t.notes || ''}\n${t.description || ''}`;
-          
-          // Match <!--LABASSIST_BILLING:{...}-->
-          const billingMatch = raw.match(/<!--LABASSIST_BILLING:(.*?)-->/);
-          if (billingMatch) {
-            try {
-              const b = JSON.parse(billingMatch[1]);
-              const key = b.paymentNumber || b.id;
-              if (key && !seenIds.has(key)) {
-                payments.push(b);
-                seenIds.add(key);
-              }
-            } catch (_) {}
-          }
+      if (invErr) {
+        console.warn('Supabase repair_invoices fetch error:', invErr.message);
+      } else if (invRows && invRows.length > 0) {
+        const { data: cancelledRows } = await supabase
+          .from('device_repairs')
+          .select('rma_number')
+          .eq('status', 'CANCELLED');
+        const cancelled = new Set((cancelledRows || []).map((r: any) => r.rma_number));
 
-          // Match <!--LABASSIST_WORKFLOW:{"billing":{...}}-->
-          const workflowMatch = raw.match(/<!--LABASSIST_WORKFLOW:(.*?)-->/);
-          if (workflowMatch) {
-            try {
-              const wf = JSON.parse(workflowMatch[1]);
-              if (wf.billing && wf.billing.totalAmount && Number(wf.billing.totalAmount) > 0) {
-                const billKey = `PAY-${t.ticket_id || t.id}`;
-                if (!seenIds.has(billKey)) {
-                  payments.push({
-                    id: t.id,
-                    paymentNumber: billKey,
-                    invoiceNumber: `INV-${t.ticket_id}`,
-                    jobOrderNumber: t.lab_id && t.pc_num ? `${t.lab_id}-${t.pc_num}` : undefined,
-                    clientName: t.reporter || 'UMak Client',
-                    clientEmail: t.user_email || undefined,
-                    technicianName: t.assignee || 'Tech. Carlos Rivera',
-                    amount: Number(wf.billing.totalAmount || 0),
-                    paymentMethod: wf.billing.paymentMethod || 'CASH',
-                    paymentStatus: wf.billing.paymentStatus || 'PAID',
-                    referenceNumber: wf.billing.onlinePaymentReference || undefined,
-                    notes: wf.billing.billingNotes || t.description || undefined,
-                    paymentDate: wf.billing.settlementDate || t.resolved_at || t.created_at || new Date().toISOString(),
-                  });
-                  seenIds.add(billKey);
-                }
-              }
-            } catch (_) {}
-          }
+        invRows.forEach((r: any) => {
+          if (cancelled.has(r.rma_number)) return;
+          const balance = Number(r.total_amount || 0) - Number(r.amount_paid || 0);
+          if (balance > 0.005) outstandingBalances.push(balance);
         });
       }
     } catch (err) {
-      console.warn('Supabase tickets billing query error:', err);
+      console.warn('Supabase repair_invoices fetch error:', err);
     }
   }
 
+  // Net amount of a ledger entry: refunds/corrections reduce revenue
+  const netAmount = (p: PaymentRecord) => (p.paymentStatus === 'REFUNDED' ? -p.amount : p.amount);
+
   // 1. Calculate Core KPI Cards
   const paidPayments = payments.filter((p) => p.paymentStatus === 'PAID');
+  const revenuePayments = payments.filter((p) => p.paymentStatus === 'PAID' || p.paymentStatus === 'REFUNDED');
   const unpaidPayments = payments.filter((p) => p.paymentStatus === 'UNPAID' || p.paymentStatus === 'PENDING');
 
-  const grossRevenue = paidPayments.reduce((sum, p) => sum + p.amount, 0);
-  const unpaidBalances = unpaidPayments.reduce((sum, p) => sum + p.amount, 0);
-  const paidCount = paidPayments.length;
+  const grossRevenue = revenuePayments.reduce((sum, p) => sum + netAmount(p), 0);
+  const unpaidBalances =
+    unpaidPayments.reduce((sum, p) => sum + p.amount, 0) +
+    outstandingBalances.reduce((sum, b) => sum + b, 0);
+  const unpaidOrdersCount = unpaidPayments.length + outstandingBalances.length;
+  // A Job Order paid in installments counts once
+  const paidCount = new Set(paidPayments.map((p) => p.jobOrderNumber || p.id)).size;
   const averageOrderValue = paidCount > 0 ? grossRevenue / paidCount : 0;
 
   // Split Cash vs Online
-  const cashPayments = paidPayments.filter((p) => p.paymentMethod === 'CASH');
-  const onlinePayments = paidPayments.filter((p) =>
+  const cashPayments = revenuePayments.filter((p) => p.paymentMethod === 'CASH');
+  const onlinePayments = revenuePayments.filter((p) =>
     ['ONLINE', 'GCASH', 'MAYA', 'BANK_TRANSFER'].includes(p.paymentMethod)
   );
 
-  const cashTotal = cashPayments.reduce((sum, p) => sum + p.amount, 0);
-  const onlineTotal = onlinePayments.reduce((sum, p) => sum + p.amount, 0);
+  const cashTotal = cashPayments.reduce((sum, p) => sum + netAmount(p), 0);
+  const onlineTotal = onlinePayments.reduce((sum, p) => sum + netAmount(p), 0);
 
   // 2. Technician Performance & Revenue Contribution Table
   const techMap: Record<
@@ -165,9 +154,10 @@ export async function GET(request: Request) {
       onlineRevenue: number;
     }
   > = {};
+  const techJobs: Record<string, Set<string>> = {};
 
-  paidPayments.forEach((p) => {
-    const tech = p.technicianName || 'Tech. Carlos Rivera';
+  revenuePayments.forEach((p) => {
+    const tech = p.technicianName || 'Unassigned';
     if (!techMap[tech]) {
       techMap[tech] = {
         techName: tech,
@@ -176,13 +166,15 @@ export async function GET(request: Request) {
         cashRevenue: 0,
         onlineRevenue: 0,
       };
+      techJobs[tech] = new Set<string>();
     }
-    techMap[tech].completedRepairs += 1;
-    techMap[tech].grossRevenue += p.amount;
+    if (p.paymentStatus === 'PAID') techJobs[tech].add(p.jobOrderNumber || p.id);
+    techMap[tech].completedRepairs = techJobs[tech].size;
+    techMap[tech].grossRevenue += netAmount(p);
     if (p.paymentMethod === 'CASH') {
-      techMap[tech].cashRevenue += p.amount;
+      techMap[tech].cashRevenue += netAmount(p);
     } else {
-      techMap[tech].onlineRevenue += p.amount;
+      techMap[tech].onlineRevenue += netAmount(p);
     }
   });
 
@@ -204,15 +196,15 @@ export async function GET(request: Request) {
     dailyMap[key] = { label: dayLabel, date: key, total: 0, cash: 0, online: 0, count: 0 };
   }
 
-  paidPayments.forEach((p) => {
+  revenuePayments.forEach((p) => {
     const key = new Date(p.paymentDate).toISOString().split('T')[0];
     if (dailyMap[key]) {
-      dailyMap[key].total += p.amount;
-      dailyMap[key].count += 1;
+      dailyMap[key].total += netAmount(p);
+      dailyMap[key].count += p.paymentStatus === 'PAID' ? 1 : 0;
       if (p.paymentMethod === 'CASH') {
-        dailyMap[key].cash += p.amount;
+        dailyMap[key].cash += netAmount(p);
       } else {
-        dailyMap[key].online += p.amount;
+        dailyMap[key].online += netAmount(p);
       }
     }
   });
@@ -227,7 +219,7 @@ export async function GET(request: Request) {
   ];
 
   const nowMs = Date.now();
-  paidPayments.forEach((p) => {
+  revenuePayments.forEach((p) => {
     const pMs = new Date(p.paymentDate).getTime();
     const daysAgo = Math.floor((nowMs - pMs) / (24 * 3600000));
     let idx = 3;
@@ -237,10 +229,10 @@ export async function GET(request: Request) {
     else idx = 3;
 
     if (weeklyChart[idx]) {
-      weeklyChart[idx].total += p.amount;
-      weeklyChart[idx].count += 1;
-      if (p.paymentMethod === 'CASH') weeklyChart[idx].cash += p.amount;
-      else weeklyChart[idx].online += p.amount;
+      weeklyChart[idx].total += netAmount(p);
+      weeklyChart[idx].count += p.paymentStatus === 'PAID' ? 1 : 0;
+      if (p.paymentMethod === 'CASH') weeklyChart[idx].cash += netAmount(p);
+      else weeklyChart[idx].online += netAmount(p);
     }
   });
 
@@ -254,16 +246,16 @@ export async function GET(request: Request) {
     monthlyMap[monthKey] = { label, monthKey, total: 0, cash: 0, online: 0, count: 0 };
   }
 
-  paidPayments.forEach((p) => {
+  revenuePayments.forEach((p) => {
     const pDate = new Date(p.paymentDate);
     const pMonthKey = `${pDate.getFullYear()}-${String(pDate.getMonth() + 1).padStart(2, '0')}`;
     if (monthlyMap[pMonthKey]) {
-      monthlyMap[pMonthKey].total += p.amount;
-      monthlyMap[pMonthKey].count += 1;
+      monthlyMap[pMonthKey].total += netAmount(p);
+      monthlyMap[pMonthKey].count += p.paymentStatus === 'PAID' ? 1 : 0;
       if (p.paymentMethod === 'CASH') {
-        monthlyMap[pMonthKey].cash += p.amount;
+        monthlyMap[pMonthKey].cash += netAmount(p);
       } else {
-        monthlyMap[pMonthKey].online += p.amount;
+        monthlyMap[pMonthKey].online += netAmount(p);
       }
     }
   });
@@ -276,7 +268,7 @@ export async function GET(request: Request) {
       averageOrderValue,
       totalOrders: payments.length,
       paidOrdersCount: paidCount,
-      unpaidOrdersCount: unpaidPayments.length,
+      unpaidOrdersCount,
       cashTotal,
       onlineTotal,
       cashPercentage: grossRevenue > 0 ? Math.round((cashTotal / grossRevenue) * 100) : 0,
@@ -289,6 +281,7 @@ export async function GET(request: Request) {
       monthly: monthlyChart,
     },
     transactions: payments,
+    technicianOptions,
     meta: {
       isSupabaseConnected: !!supabase,
       totalRecords: payments.length,
@@ -308,7 +301,7 @@ export async function POST(request: Request) {
       jobOrderNumber,
       clientName,
       clientEmail,
-      technicianName = 'Tech. Carlos Rivera',
+      technicianName = 'Unassigned',
       amount,
       paymentMethod = 'CASH',
       paymentStatus = 'PAID',
@@ -325,7 +318,7 @@ export async function POST(request: Request) {
     }
 
     const num = Number(amount);
-    const paymentNumber = `PAY-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const paymentNumber = `PAY-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`;
 
     const newPayment: PaymentRecord = {
       id: `pay-${Date.now()}`,
@@ -344,9 +337,9 @@ export async function POST(request: Request) {
     };
 
     if (supabase) {
-      // 1. Try insert into public.payments
-      try {
-        await supabase.from('payments').insert({
+      const { data: inserted, error: insertErr } = await supabase
+        .from('payments')
+        .insert({
           payment_number: newPayment.paymentNumber,
           invoice_number: newPayment.invoiceNumber || null,
           job_order_number: newPayment.jobOrderNumber || null,
@@ -359,76 +352,15 @@ export async function POST(request: Request) {
           reference_number: newPayment.referenceNumber || null,
           notes: newPayment.notes || null,
           payment_date: newPayment.paymentDate,
-        });
-      } catch (insertErr) {
-        console.warn('Payment insert into public.payments warning:', insertErr);
+        })
+        .select('id')
+        .single();
+
+      if (insertErr) {
+        console.error('Payment insert into public.payments failed:', insertErr.message);
+        return NextResponse.json({ error: `Payment could not be saved: ${insertErr.message}` }, { status: 500 });
       }
-
-      // 2. Persist billing metadata into Supabase tickets table
-      try {
-        let ticketTarget = null;
-        if (jobOrderNumber) {
-          const { data: tkt } = await supabase
-            .from('tickets')
-            .select('*')
-            .or(`ticket_id.eq.${jobOrderNumber},id.eq.${jobOrderNumber}`)
-            .maybeSingle();
-          ticketTarget = tkt;
-        }
-
-        if (!ticketTarget && clientEmail) {
-          const { data: tkt } = await supabase
-            .from('tickets')
-            .select('*')
-            .ilike('description', `%${clientEmail}%`)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          ticketTarget = tkt;
-        }
-
-        if (!ticketTarget && clientName) {
-          const { data: tkt } = await supabase
-            .from('tickets')
-            .select('*')
-            .ilike('reporter', `%${clientName}%`)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          ticketTarget = tkt;
-        }
-
-        if (ticketTarget) {
-          const existingNotes = ticketTarget.notes || '';
-          const cleanNotes = existingNotes.replace(/<!--LABASSIST_BILLING:[\s\S]*?-->/g, '').trim();
-          const updatedNotes = cleanNotes
-            ? `${cleanNotes}\n<!--LABASSIST_BILLING:${JSON.stringify(newPayment)}-->`
-            : `<!--LABASSIST_BILLING:${JSON.stringify(newPayment)}-->`;
-
-          await supabase
-            .from('tickets')
-            .update({ notes: updatedNotes, status: paymentStatus === 'PAID' ? 'RESOLVED' : ticketTarget.status })
-            .eq('id', ticketTarget.id);
-        } else {
-          // If no existing ticket matched, create a repair ticket with billing in Supabase
-          const newTicketId = `TKT-${Math.floor(2000 + Math.random() * 8000)}`;
-          await supabase.from('tickets').insert({
-            ticket_id: newTicketId,
-            lab_id: 'LAB-101',
-            pc_num: 'PC-01',
-            category: 'DISPLAY',
-            key: 'A',
-            priority: 'HIGH',
-            status: paymentStatus === 'PAID' ? 'RESOLVED' : 'PENDING',
-            reporter: clientName,
-            assignee: technicianName,
-            description: `Repair Service for ${clientName}\n<!--LABASSIST_TKT_META:${JSON.stringify({ userEmail: clientEmail })}-->`,
-            notes: `<!--LABASSIST_BILLING:${JSON.stringify(newPayment)}-->`,
-          });
-        }
-      } catch (tickErr) {
-        console.warn('Billing persistence into Supabase tickets warning:', tickErr);
-      }
+      if (inserted?.id) newPayment.id = inserted.id;
     }
 
     return NextResponse.json({ success: true, payment: newPayment });

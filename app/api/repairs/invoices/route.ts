@@ -387,6 +387,25 @@ export async function POST(request: Request) {
 
     const totalAmount = calculatedItems.reduce((acc: number, curr: any) => acc + curr.totalCost, 0);
 
+    const supabase = getSupabaseAdmin();
+
+    // Amount already received for this Job Order, kept when billing is edited without a new payment
+    let previousAmountPaid = 0;
+    let previousReference: string | null = null;
+    let previousMethod: string | null = null;
+    if (supabase) {
+      const { data: prevInv } = await supabase
+        .from('repair_invoices')
+        .select('amount_paid, online_payment_reference, payment_method')
+        .eq('rma_number', joNum)
+        .maybeSingle();
+      if (prevInv) {
+        previousAmountPaid = Number(prevInv.amount_paid || 0);
+        previousReference = prevInv.online_payment_reference || null;
+        previousMethod = prevInv.payment_method || null;
+      }
+    }
+
     // Strict validation according to specifications
     let resolvedPaymentStatus = paymentStatus;
     let resolvedAmountPaid = 0;
@@ -435,9 +454,11 @@ export async function POST(request: Request) {
           resolvedReference = onlinePaymentReference.trim();
         }
       } else {
+        // No new payment collected: keep what the client already paid (e.g. an earlier partial payment)
         resolvedPaymentStatus = 'UNPAID';
-        resolvedAmountPaid = 0;
-        resolvedReference = null;
+        resolvedAmountPaid = previousAmountPaid;
+        resolvedReference = previousAmountPaid > 0 ? previousReference : null;
+        if (previousAmountPaid > 0 && previousMethod) resolvedPaymentMethod = previousMethod;
       }
     }
 
@@ -447,7 +468,6 @@ export async function POST(request: Request) {
     }
 
     const todayDate = new Date().toISOString().split('T')[0];
-    const supabase = getSupabaseAdmin();
 
     // Check if an existing invoice exists for this Job Order to preserve its invoice number
     let invoiceNumber = inMemoryInvoices[joNum]?.invoiceNumber;
@@ -590,6 +610,45 @@ export async function POST(request: Request) {
         );
       }
       if (savedInv?.id) formattedInvoice.id = savedInv.id;
+
+      // Record money received into the payments ledger (source of Admin Revenue Analytics).
+      // Reconciles against what is already recorded for this Job Order, so retries never double-count.
+      const { data: ledgerRows, error: ledgerErr } = await supabase
+        .from('payments')
+        .select('amount, payment_status')
+        .eq('rma_number', joNum);
+
+      if (ledgerErr) {
+        console.error('[Invoices POST] payments ledger read failed:', ledgerErr.message);
+      } else {
+        const recorded = (ledgerRows || []).reduce((sum: number, r: any) => {
+          if (r.payment_status === 'PAID') return sum + Number(r.amount || 0);
+          if (r.payment_status === 'REFUNDED') return sum - Number(r.amount || 0);
+          return sum;
+        }, 0);
+        const delta = Math.round((resolvedAmountPaid - recorded) * 100) / 100;
+
+        if (delta !== 0) {
+          const { error: payInsErr } = await supabase.from('payments').insert({
+            payment_number: `PAY-${joNum}-${Date.now().toString(36).toUpperCase()}`,
+            rma_number: joNum,
+            invoice_number: invoiceNumber,
+            job_order_number: joNum,
+            client_name: resolvedClientName,
+            client_email: resolvedEmail,
+            technician_name: resolvedTechnician,
+            amount: Math.abs(delta),
+            payment_method: resolvedPaymentMethod || 'CASH',
+            payment_status: delta > 0 ? 'PAID' : 'REFUNDED',
+            reference_number: delta > 0 ? resolvedReference : null,
+            notes: delta > 0 ? `Payment received for Job Order ${joNum}` : `Payment correction for Job Order ${joNum}`,
+            payment_date: new Date().toISOString(),
+          });
+          if (payInsErr) {
+            console.error('[Invoices POST] payments ledger insert failed:', payInsErr.message);
+          }
+        }
+      }
     }
 
     // Store in global in-memory cache and sync to extended repair store
