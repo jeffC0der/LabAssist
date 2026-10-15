@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { sendRepairReceiptEmail, sendReadyForPickupEmail, sendFinalReceiptEmail } from '@/lib/emailService';
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
+import { findOverLimitField } from '@/lib/repairLimits';
 import {
   extractWorkflowMetadata,
   packWorkflowMetadata,
@@ -351,6 +352,14 @@ export async function POST(request: Request) {
         { error: 'Missing required fields: clientName, clientEmail, deviceModel, reportedIssue' },
         { status: 400 }
       );
+    }
+
+    const tooLong = findOverLimitField({
+      clientName, clientEmail, clientPhone, clientDepartment,
+      deviceModel, serialNumber, osSpecs, reportedIssue, additionalInspectionNotes,
+    });
+    if (tooLong) {
+      return NextResponse.json({ error: tooLong }, { status: 400 });
     }
 
     const now = new Date();

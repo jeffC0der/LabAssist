@@ -9,6 +9,8 @@ import WorkstationGrid from '@/components/student/WorkstationGrid';
 import TechnicianRepairsWorkbench from '@/components/technician/TechnicianRepairsWorkbench';
 import { useAuth } from '@/context/AuthContext';
 import { useTickets } from '@/context/TicketContext';
+import { useWorkstations } from '@/context/WorkstationContext';
+import { useRepairs } from '@/context/RepairContext';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { Wrench, Monitor, ListOrdered, Sparkles, Layers, Shield } from 'lucide-react';
 
@@ -18,22 +20,26 @@ interface TabItem {
   id: TechnicianTab;
   label: string;
   icon: React.ReactNode;
-  badge?: React.ReactNode;
+  badge?: string;
 }
 
 export default function TechnicianPage() {
   const { role, isLoading, isAuthenticated } = useAuth();
   const { tickets } = useTickets();
+  const { workstations } = useWorkstations();
+  const { repairs } = useRepairs();
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState<TechnicianTab>('DISPATCH_QUEUE');
 
   const isAuthorized = isAuthenticated && role === 'TECHNICIAN';
 
-  // Count active pending/dispatched tickets
-  const pendingTicketCount = tickets.filter(
-    (t) => t.status === 'PENDING' || t.status === 'DISPATCHED'
-  ).length;
+  // Real counts for the menu badges
+  const pendingTicketCount = tickets.filter((t) => t.status === 'PENDING').length;
+  const dispatchedTicketCount = tickets.filter((t) => t.status === 'DISPATCHED').length;
+  const allStations = Object.values(workstations).flat();
+  const faultyStationCount = allStations.filter((st) => st.status === 'ISSUE_REPORTED' || st.status === 'UNDER_REPAIR').length;
+  const activeRepairCount = repairs.filter((r) => r.status !== 'COMPLETED' && r.status !== 'CANCELLED').length;
 
   useEffect(() => {
     if (!isLoading) {
@@ -59,33 +65,21 @@ export default function TechnicianPage() {
   const tabs: TabItem[] = [
     {
       id: 'PC_DISPLAY',
-      label: 'PC Display',
-      icon: <Monitor size={16} />,
-      badge: (
-        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-          Orientation
-        </span>
-      ),
+      label: 'Live Workstations',
+      icon: <Monitor size={15} />,
+      badge: faultyStationCount > 0 ? `${faultyStationCount} Need Attention` : `${allStations.length} PCs`,
     },
     {
       id: 'DISPATCH_QUEUE',
-      label: 'IT Operations & Dispatch Queue',
-      icon: <ListOrdered size={16} />,
-      badge: pendingTicketCount > 0 ? (
-        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-          {pendingTicketCount} Live
-        </span>
-      ) : undefined,
+      label: 'Ticket Queue & Dispatch',
+      icon: <ListOrdered size={15} />,
+      badge: pendingTicketCount > 0 ? `${pendingTicketCount} Pending` : `${dispatchedTicketCount} Dispatched`,
     },
     {
       id: 'REPAIRS',
-      label: 'Repairs',
-      icon: <Wrench size={16} />,
-      badge: (
-        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-violet-500/20 text-violet-300 border border-violet-500/30">
-          Job Cards
-        </span>
-      ),
+      label: 'Repairs & Job Cards',
+      icon: <Wrench size={15} />,
+      badge: `${activeRepairCount} Active`,
     },
   ];
 
@@ -124,68 +118,100 @@ export default function TechnicianPage() {
           </div>
         </div>
 
-        {/* ── Technician Tabs Navigation Bar ──────────────────────── */}
-        <div className="flex flex-wrap items-center gap-2 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/80 backdrop-blur-md shadow-card">
-          {tabs.map((tab) => {
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all duration-200 ${
-                  isActive
-                    ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-glow-indigo'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                <span className={isActive ? 'text-white' : 'text-slate-400'}>{tab.icon}</span>
-                <span>{tab.label}</span>
-                {tab.badge}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* ── TAB 1: PC Display (Orientation & Layout Grid) ────────── */}
-        {activeTab === 'PC_DISPLAY' && (
-          <section aria-label="PC Display Orientation Grid" className="animate-fade-in space-y-4">
-            <div className="flex items-center justify-between pb-1">
-              <div>
-                <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                  <Monitor size={18} className="text-cyan-400" />
-                  Campus PC Stations Display & Physical Orientation
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Visual layout grid of all campus laboratory workstations with hardware specifications, IP telemetry, and active failure flags.
-                </p>
+        {/* Main Layout: left navigation menu (lg+) / scrollable tab row (smaller screens) + section content */}
+        <div className="flex flex-col lg:flex-row items-start gap-6">
+          <aside className="w-full lg:w-72 flex-shrink-0 lg:sticky lg:top-20">
+            <div className="glass rounded-2xl p-2 sm:p-3 border border-slate-800/80 shadow-card">
+              <div className="hidden lg:flex px-3 pt-1 pb-3 mb-2 text-[11px] font-mono uppercase tracking-wider text-slate-400 border-b border-slate-800/60 items-center justify-between">
+                <span>Technician Navigation</span>
+                <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
               </div>
+
+              <nav
+                className="flex flex-row lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible"
+                aria-label="Technician Board Sections"
+              >
+                {tabs.map((tab) => {
+                  const isActive = activeTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setActiveTab(tab.id)}
+                      aria-current={isActive ? 'page' : undefined}
+                      className={`group relative flex-shrink-0 lg:w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-all duration-200 ${
+                        isActive
+                          ? 'bg-gradient-to-r from-indigo-500/20 to-purple-500/10 border-indigo-500/40 shadow-lg'
+                          : 'border-transparent text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                      }`}
+                    >
+                      <div
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${
+                          isActive
+                            ? 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white shadow-glow-indigo'
+                            : 'bg-slate-800/70 text-slate-400 group-hover:text-slate-200'
+                        }`}
+                      >
+                        {tab.icon}
+                      </div>
+                      <div className="min-w-0">
+                        <span
+                          className={`block text-xs font-bold whitespace-nowrap lg:whitespace-normal ${
+                            isActive ? 'text-white' : 'text-slate-200'
+                          }`}
+                        >
+                          {tab.label}
+                        </span>
+                        {tab.badge && (
+                          <span
+                            className={`block text-[10px] font-mono mt-0.5 whitespace-nowrap ${
+                              isActive ? 'text-indigo-200' : 'text-slate-500'
+                            }`}
+                          >
+                            {tab.badge}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Active accent bar */}
+                      {isActive && (
+                        <span className="hidden lg:block absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-indigo-400" />
+                      )}
+                    </button>
+                  );
+                })}
+              </nav>
             </div>
+          </aside>
 
-            <WorkstationGrid />
-          </section>
-        )}
+          {/* Section Content */}
+          <div className="flex-1 min-w-0 w-full">
+            {activeTab === 'PC_DISPLAY' && (
+              <section aria-label="Live Workstations" className="animate-fade-in">
+                <WorkstationGrid />
+              </section>
+            )}
 
-        {/* ── TAB 2: IT Operations & Dispatch Queue ─────────────────── */}
-        {activeTab === 'DISPATCH_QUEUE' && (
-          <section aria-label="IT Operations & Dispatch Queue" className="animate-fade-in space-y-6">
-            {/* KPI Metrics */}
-            <MetricsBar />
+            {activeTab === 'DISPATCH_QUEUE' && (
+              <section aria-label="Ticket Queue & Dispatch" className="animate-fade-in space-y-6">
+                {/* KPI Metrics */}
+                <MetricsBar />
 
-            {/* Filters */}
-            <FilterBar />
+                {/* Filters */}
+                <FilterBar />
 
-            {/* Ticket Table */}
-            <TicketTable />
-          </section>
-        )}
+                {/* Ticket Table */}
+                <TicketTable />
+              </section>
+            )}
 
-        {/* ── TAB 3: Repairs (Job Cards with Quick Filters PC / Laptop) ─ */}
-        {activeTab === 'REPAIRS' && (
-          <section aria-label="Repairs Workbench & Job Cards" className="animate-fade-in">
-            <TechnicianRepairsWorkbench />
-          </section>
-        )}
+            {activeTab === 'REPAIRS' && (
+              <section aria-label="Repairs Workbench & Job Cards" className="animate-fade-in">
+                <TechnicianRepairsWorkbench />
+              </section>
+            )}
+          </div>
+        </div>
 
         {/* Global Footer */}
         <div className="mt-12 pt-4 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-600">

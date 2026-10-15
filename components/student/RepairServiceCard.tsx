@@ -45,6 +45,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { useRepairs, DeviceRepair, RepairStatus } from '@/context/RepairContext';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { REPAIR_FIELD_LIMITS } from '@/lib/repairLimits';
 
 export interface RepairIntakeRequest {
   id: string;
@@ -428,6 +429,7 @@ export default function RepairServiceCard() {
                       type="text"
                       required
                       value={clientName}
+                      maxLength={REPAIR_FIELD_LIMITS.clientName}
                       onChange={(e) => setClientName(e.target.value)}
                       placeholder="e.g. Marcus Vance"
                       className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-xs text-slate-100 placeholder-slate-500 outline-none transition-all"
@@ -446,6 +448,7 @@ export default function RepairServiceCard() {
                       type="email"
                       required
                       value={clientEmail}
+                      maxLength={REPAIR_FIELD_LIMITS.clientEmail}
                       onChange={(e) => setClientEmail(e.target.value)}
                       placeholder="e.g. marcus.vance@umak.edu.ph"
                       className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-xs text-slate-100 placeholder-slate-500 outline-none transition-all font-mono"
@@ -496,6 +499,7 @@ export default function RepairServiceCard() {
                     type="text"
                     required
                     value={deviceModel}
+                    maxLength={REPAIR_FIELD_LIMITS.deviceModel}
                     onChange={(e) => setDeviceModel(e.target.value)}
                     placeholder="e.g. Lenovo Legion 5 15ARH05"
                     className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-xs text-slate-100 placeholder-slate-500 outline-none transition-all"
@@ -513,6 +517,7 @@ export default function RepairServiceCard() {
                       id="serial-number-input"
                       type="text"
                       value={serialNumber}
+                      maxLength={REPAIR_FIELD_LIMITS.serialNumber}
                       onChange={(e) => setSerialNumber(e.target.value)}
                       placeholder="e.g. PF2X9Y8Z"
                       className="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-xs text-slate-100 placeholder-slate-500 font-mono outline-none transition-all"
@@ -532,6 +537,7 @@ export default function RepairServiceCard() {
                     id="os-specs-input"
                     type="text"
                     value={osSpecs}
+                    maxLength={REPAIR_FIELD_LIMITS.osSpecs}
                     onChange={(e) => setOsSpecs(e.target.value)}
                     placeholder="e.g. Windows 11 Home | Ryzen 5 7535HS | 16GB RAM | RTX 3050"
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-xs text-slate-100 placeholder-slate-500 font-mono outline-none transition-all"
@@ -549,9 +555,15 @@ export default function RepairServiceCard() {
                   required
                   rows={3}
                   value={reportedIssue}
+                  maxLength={REPAIR_FIELD_LIMITS.reportedIssue}
                   onChange={(e) => setReportedIssue(e.target.value)}
                   className="w-full p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-xs text-slate-100 outline-none transition-all resize-none"
                 />
+                <p className={`mt-1 text-right text-[10px] font-mono ${
+                  reportedIssue.length >= REPAIR_FIELD_LIMITS.reportedIssue ? 'text-rose-400' : 'text-slate-500'
+                }`}>
+                  {reportedIssue.length} / {REPAIR_FIELD_LIMITS.reportedIssue} characters
+                </p>
               </div>
             </div>
           </div>
@@ -679,9 +691,15 @@ export default function RepairServiceCard() {
                 id="additional-notes-input"
                 rows={2}
                 value={additionalNotes}
+                maxLength={REPAIR_FIELD_LIMITS.additionalInspectionNotes}
                 onChange={(e) => setAdditionalNotes(e.target.value)}
                 className="w-full p-3 rounded-xl bg-slate-900/90 border border-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-xs text-slate-100 outline-none transition-all resize-none"
               />
+              <p className={`mt-1 text-right text-[10px] font-mono ${
+                  additionalNotes.length >= REPAIR_FIELD_LIMITS.additionalInspectionNotes ? 'text-rose-400' : 'text-slate-500'
+                }`}>
+                  {additionalNotes.length} / {REPAIR_FIELD_LIMITS.additionalInspectionNotes} characters
+                </p>
             </div>
           </div>
 
@@ -812,7 +830,7 @@ export default function RepairServiceCard() {
                   return (
                     <div
                       key={req.id}
-                      className={`glass rounded-2xl border transition-all duration-200 overflow-hidden shadow-card ${
+                      className={`glass rounded-2xl border transition-all duration-200 overflow-hidden shadow-card [overflow-wrap:anywhere] ${
                         isExpanded
                           ? 'border-indigo-500/50 bg-slate-900/90 ring-1 ring-indigo-500/20'
                           : 'border-slate-800/80 hover:border-slate-700 bg-slate-900/50'
@@ -823,7 +841,7 @@ export default function RepairServiceCard() {
                         onClick={() => setExpandedRepairId(isExpanded ? null : req.id)}
                         className="p-5 cursor-pointer hover:bg-slate-800/30 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/60 select-none"
                       >
-                        <div className="flex items-start sm:items-center gap-3.5">
+                        <div className="flex items-start sm:items-center gap-3.5 min-w-0">
                           <div
                             className={`w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 ${
                               req.deviceType === 'Laptop'
@@ -1282,7 +1300,7 @@ export default function RepairServiceCard() {
 
                             <div className="md:col-span-8 space-y-1">
                               <span className="text-slate-500 block font-mono text-[10px] uppercase font-bold">Primary Reported Complaint</span>
-                              <p className="text-slate-200 font-medium leading-relaxed">{req.reportedIssue}</p>
+                              <p className="text-slate-200 font-medium leading-relaxed whitespace-pre-line">{req.reportedIssue}</p>
                             </div>
                           </div>
 

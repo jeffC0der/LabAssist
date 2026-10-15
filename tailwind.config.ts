@@ -9,9 +9,13 @@ module.exports = {
   ],
   theme: {
     extend: {
+      // The page background is a background-only color: as a general color named "base" it also
+      // generated a text-base color rule (#0f172a) that turned any "sm:text-base" text near-black
+      backgroundColor: {
+        'base': '#0f172a',
+      },
       colors: {
         // Base surfaces
-        'base': '#0f172a',
         'surface': '#1e293b',
         'card': '#1e293b',
         'border': '#334155',

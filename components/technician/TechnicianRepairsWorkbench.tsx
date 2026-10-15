@@ -1203,7 +1203,7 @@ export default function TechnicianRepairsWorkbench() {
             return (
               <div
                 key={job.id}
-                className={`glass rounded-2xl border transition-all duration-200 overflow-hidden shadow-card ${
+                className={`glass rounded-2xl border transition-all duration-200 overflow-hidden shadow-card [overflow-wrap:anywhere] ${
                   isExpanded
                     ? 'border-indigo-500/50 bg-slate-900/90 ring-1 ring-indigo-500/20'
                     : 'border-slate-800/80 hover:border-slate-700'
@@ -1214,7 +1214,7 @@ export default function TechnicianRepairsWorkbench() {
                   onClick={() => setExpandedJobId(isExpanded ? null : job.id)}
                   className="p-5 cursor-pointer hover:bg-slate-800/30 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/60 select-none"
                 >
-                  <div className="flex items-start sm:items-center gap-3.5">
+                  <div className="flex items-start sm:items-center gap-3.5 min-w-0">
                     <div
                       className={`w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 ${
                         job.deviceType === 'Laptop'
@@ -1316,7 +1316,7 @@ export default function TechnicianRepairsWorkbench() {
                           Problem / Reported Issue & Hardware Specs
                         </span>
                         <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 space-y-2 text-xs">
-                          <p className="text-slate-200 leading-relaxed font-medium">
+                          <p className="text-rose-300 leading-relaxed font-medium whitespace-pre-line">
                             {job.reportedIssue}
                           </p>
                           <div className="pt-2 border-t border-slate-800 text-slate-400 font-mono text-[11px] flex items-center gap-1.5">
@@ -1405,7 +1405,7 @@ export default function TechnicianRepairsWorkbench() {
                           .trim();
                         if (!cleanRemarks) return null;
                         return (
-                          <p className="text-xs text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/70 font-mono">
+                          <p className="text-xs text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/70 font-mono whitespace-pre-line">
                             <span className="text-amber-300 font-bold mr-1">Remarks & Accessories:</span>
                             {cleanRemarks}
                           </p>
@@ -1430,7 +1430,7 @@ export default function TechnicianRepairsWorkbench() {
                         <div className="space-y-1.5">
                           <label className="text-xs font-bold text-slate-200 flex items-center justify-between">
                             <span>2. Technician Diagnostic Evaluation & Assessment *</span>
-                            <span className="text-[11px] font-normal text-slate-400">Required before confirming</span>
+                            <span className="text-[11px] font-normal text-rose-400">Required before confirming</span>
                           </label>
                           <textarea
                             rows={3}
@@ -1545,7 +1545,7 @@ export default function TechnicianRepairsWorkbench() {
                             type="button"
                             disabled={isConfirmingId === job.id}
                             onClick={() => handleConfirmJobOrder(job)}
-                            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold transition-all flex items-center gap-2 shadow-glow-indigo disabled:opacity-50"
+                            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white text-xs font-bold transition-all flex items-center gap-2 shadow-glow-emerald disabled:opacity-50"
                           >
                             <CheckCircle2 size={16} />
                             <span>{isConfirmingId === job.id ? 'Confirming...' : 'Confirm Job Order'}</span>

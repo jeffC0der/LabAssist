@@ -45,6 +45,11 @@ export function WorkstationProvider({ children }: { children: React.ReactNode })
           'postgres_changes',
           { event: '*', schema: 'public', table: 'workstations' },
           (payload) => {
+            // A deleted PC (or room) carries only its row id: reload the list so it disappears
+            if (payload.eventType === 'DELETE') {
+              refreshWorkstations();
+              return;
+            }
             if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
               const row: any = payload.new;
               const lab = row.lab_code;
@@ -87,7 +92,7 @@ export function WorkstationProvider({ children }: { children: React.ReactNode })
     } catch (err) {
       console.warn('Could not establish Supabase workstation realtime channel:', err);
     }
-  }, []);
+  }, [refreshWorkstations]);
 
   const updateStationStatus = useCallback(
     async (labCode: string, pcNum: string, status: WorkstationStatus, issue?: string) => {
