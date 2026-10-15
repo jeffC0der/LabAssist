@@ -59,7 +59,6 @@ export default function AuthCard() {
     completeGoogleSignupWithPassword,
     requestLoginOtp,
     verifyLoginOtp,
-    checkEmailRequiresOtp,
     isLoading,
   } = useAuth();
   const toast = useToast();
@@ -215,19 +214,7 @@ export default function AuthCard() {
     const cleanEmail = email.trim().toLowerCase();
 
     try {
-      // Check if user account has Login OTP enabled
-      const otpStatus = await checkEmailRequiresOtp(cleanEmail);
-
-      if (otpStatus.requireOtp) {
-        // Send Brevo OTP code for login
-        await requestLoginOtp(cleanEmail, otpStatus.name);
-        setView('verify_login_otp');
-        setResendCooldown(60);
-        toast.info('Login Code Sent', `A 6-digit verification code was sent to ${cleanEmail}`);
-        return;
-      }
-
-      // Standard direct password login
+      // The server checks the password first; two-factor accounts then get an emailed code
       const loggedInUser = await signIn(cleanEmail, password);
       setIsLocked(false);
       setLockSecondsRemaining(0);
@@ -241,6 +228,15 @@ export default function AuthCard() {
         router.push('/student');
       }
     } catch (err: any) {
+      if (err?.otpRequired) {
+        // Correct password on a two-factor account: ask for the emailed code
+        setAttemptsRemaining(null);
+        setOtpToken('');
+        setView('verify_login_otp');
+        setResendCooldown(60);
+        toast.info('Login Code Sent', `A 6-digit verification code was sent to ${cleanEmail}`);
+        return;
+      }
       if (err?.isLocked) {
         setIsLocked(true);
         setLockSecondsRemaining(err.remainingSeconds || 900);
@@ -680,6 +676,7 @@ export default function AuthCard() {
                 />
                 <button
                   type="button"
+                  tabIndex={-1}
                   disabled={isLocked}
                   onClick={() => setShowPassword(p => !p)}
                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors p-0.5 disabled:opacity-50"
@@ -797,6 +794,7 @@ export default function AuthCard() {
                 />
                 <button
                   type="button"
+                  tabIndex={-1}
                   onClick={() => setShowPassword(p => !p)}
                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors p-0.5"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
@@ -832,6 +830,7 @@ export default function AuthCard() {
                 />
                 <button
                   type="button"
+                  tabIndex={-1}
                   onClick={() => setShowConfirm(p => !p)}
                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors p-0.5"
                   aria-label={showConfirm ? 'Hide confirm password' : 'Show confirm password'}
@@ -1210,6 +1209,7 @@ export default function AuthCard() {
                 />
                 <button
                   type="button"
+                  tabIndex={-1}
                   onClick={() => setShowNewPassword(p => !p)}
                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors p-0.5"
                   aria-label={showNewPassword ? 'Hide password' : 'Show password'}
@@ -1313,6 +1313,7 @@ export default function AuthCard() {
                 />
                 <button
                   type="button"
+                  tabIndex={-1}
                   onClick={() => setShowGooglePassword(p => !p)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
                   aria-label={showGooglePassword ? 'Hide password' : 'Show password'}
@@ -1344,6 +1345,7 @@ export default function AuthCard() {
                 />
                 <button
                   type="button"
+                  tabIndex={-1}
                   onClick={() => setShowGoogleConfirm(p => !p)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
                   aria-label={showGoogleConfirm ? 'Hide password' : 'Show password'}

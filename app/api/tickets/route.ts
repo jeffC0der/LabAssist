@@ -103,7 +103,23 @@ export async function GET(request: Request) {
     }
 
     // Never seed placeholder tickets into the database: an empty table means no incidents yet
-    const tickets: Ticket[] = (data || []).map(rowToTicket);
+    const allTickets: Ticket[] = (data || []).map(rowToTicket);
+
+    // Staff see everything. Students see their own tickets in full, and only the workstation
+    // status details (no reporter identity, description or notes) for everyone else's.
+    const me = auth.user;
+    const isOwn = (t: Ticket) =>
+      (!!t.userId && t.userId === me.id) ||
+      (!!t.userEmail && t.userEmail.trim().toLowerCase() === me.email) ||
+      (!t.userId && !t.userEmail && (t.reporter || '').trim().toLowerCase() === me.name.trim().toLowerCase());
+    const tickets = STAFF_ROLES.includes(me.role)
+      ? allTickets
+      : allTickets.map((t) =>
+          isOwn(t)
+            ? t
+            : { ...t, reporter: 'Another user', description: '', notes: undefined, userId: undefined, userEmail: undefined }
+        );
+
     return NextResponse.json({ tickets });
   } catch (err: any) {
     console.error('Error fetching tickets:', err);

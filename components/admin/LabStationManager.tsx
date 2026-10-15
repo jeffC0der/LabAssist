@@ -1,88 +1,118 @@
 'use client';
-import React, { useState } from 'react';
-import { Layers, Plus, Cpu, MapPin, HardDrive, Trash2, Edit3, CheckCircle2, AlertCircle, X } from 'lucide-react';
-import { MOCK_LAB_ROOMS_CONFIG, type LabRoomConfig } from '@/lib/mockData';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Layers, Plus, Cpu, MapPin, X, RefreshCw } from 'lucide-react';
+import type { LabRoom } from '@/app/api/admin/labs/route';
 import { useToast } from '@/context/ToastContext';
 
 export default function LabStationManager() {
   const toast = useToast();
-  const [rooms, setRooms] = useState<LabRoomConfig[]>(MOCK_LAB_ROOMS_CONFIG);
+  const [rooms, setRooms] = useState<LabRoom[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // New room modal
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newCode, setNewCode] = useState('');
   const [newName, setNewName] = useState('');
   const [newBuilding, setNewBuilding] = useState('Turing Engineering Hall');
-  const [newFloor, setNewFloor] = useState('3rd Floor');
+  const [newFloor, setNewFloor] = useState('1st Floor');
   const [newCapacity, setNewCapacity] = useState(24);
-  const [newMac, setNewMac] = useState('24:6F:28:B1:XX:XX');
+  const [newMac, setNewMac] = useState('');
 
   // Mapping MAC to existing room
   const [selectedRoomForMac, setSelectedRoomForMac] = useState<string | null>(null);
   const [macInput, setMacInput] = useState('');
 
-  const handleAddRoom = (e: React.FormEvent) => {
+  const loadRooms = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/admin/labs', { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load lab rooms');
+      setRooms(data.rooms || []);
+      setLoadError(null);
+    } catch (err: any) {
+      setLoadError(err.message || 'Failed to load lab rooms');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRooms();
+  }, [loadRooms]);
+
+  // Send a change to the API, then reload so the cards always show what the database holds
+  const save = async (method: string, body?: any, query = ''): Promise<boolean> => {
+    setIsSaving(true);
+    try {
+      const res = await fetch(`/api/admin/labs${query}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error('Save Failed', data.error || 'The change could not be saved.');
+        return false;
+      }
+      if (data.warning) toast.warning('Saved With Warning', data.warning);
+      await loadRooms();
+      return true;
+    } catch {
+      toast.error('Save Failed', 'Could not reach the server.');
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAddRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCode.trim() || !newName.trim()) {
       toast.warning('Missing Fields', 'Please provide a Room Code and Name.');
       return;
     }
-
-    const created: LabRoomConfig = {
-      id: `ROOM-${Date.now()}`,
-      code: newCode.toUpperCase().trim(),
+    const code = newCode.toUpperCase().trim();
+    const ok = await save('POST', {
+      action: 'create_room',
+      code,
       name: newName.trim(),
       building: newBuilding,
       floor: newFloor,
-      capacity: Number(newCapacity) || 20,
-      activeStations: Number(newCapacity) || 20,
-      mappedMacs: newMac ? [newMac.trim().toUpperCase()] : ['A0:B7:65:F4:00:01'],
-      clusterMaster: `ESP-${newCode.toUpperCase().replace('-', '')}-A`,
-      status: 'OPERATIONAL',
-    };
+      pcCount: Number(newCapacity),
+      mac: newMac.trim(),
+    });
+    if (!ok) return;
 
-    setRooms(prev => [...prev, created]);
-    toast.success('Lab Room Registered', `${created.code} (${created.name}) created with capacity ${created.capacity} PCs.`);
+    toast.success('Lab Room Registered', `${code} (${newName.trim()}) created with ${newCapacity} PCs.`);
     setIsAddModalOpen(false);
-
-    // Reset fields
     setNewCode('');
     setNewName('');
+    setNewMac('');
   };
 
-  const handleAddMacToRoom = (roomId: string) => {
+  const handleAddMacToRoom = async (room: LabRoom) => {
     if (!macInput.trim()) return;
     const formattedMac = macInput.toUpperCase().trim();
-    setRooms(prev => prev.map(r => {
-      if (r.id === roomId && !r.mappedMacs.includes(formattedMac)) {
-        return { ...r, mappedMacs: [...r.mappedMacs, formattedMac] };
-      }
-      return r;
-    }));
-    toast.success('ESP32 MAC Mapped', `Mapped ${formattedMac} to cluster.`);
+    const ok = await save('POST', { action: 'add_mac', code: room.code, mac: formattedMac });
+    if (!ok) return;
+    toast.success('ESP32 MAC Mapped', `Mapped ${formattedMac} to ${room.code}.`);
     setMacInput('');
     setSelectedRoomForMac(null);
   };
 
-  const handleRemoveMac = (roomId: string, mac: string) => {
-    setRooms(prev => prev.map(r => {
-      if (r.id === roomId) {
-        return { ...r, mappedMacs: r.mappedMacs.filter(m => m !== mac) };
-      }
-      return r;
-    }));
-    toast.info('MAC Unmapped', `Removed ${mac} from room cluster.`);
+  const handleRemoveMac = async (room: LabRoom, mac: string) => {
+    const ok = await save('DELETE', undefined, `?mac=${encodeURIComponent(mac)}`);
+    if (ok) toast.info('MAC Unmapped', `Removed ${mac} from ${room.code}.`);
   };
 
-  const handleToggleStatus = (roomId: string) => {
-    setRooms(prev => prev.map(r => {
-      if (r.id === roomId) {
-        const nextStatus = r.status === 'OPERATIONAL' ? 'MAINTENANCE' : 'OPERATIONAL';
-        toast.info('Room Status Updated', `${r.code} set to ${nextStatus}`);
-        return { ...r, status: nextStatus };
-      }
-      return r;
-    }));
+  const handleToggleStatus = async (room: LabRoom) => {
+    if (isSaving) return;
+    const nextStatus = room.status === 'OPERATIONAL' ? 'MAINTENANCE' : 'OPERATIONAL';
+    const ok = await save('PATCH', { code: room.code, status: nextStatus });
+    if (ok) toast.info('Room Status Updated', `${room.code} set to ${nextStatus}`);
   };
 
   return (
@@ -106,6 +136,16 @@ export default function LabStationManager() {
           </div>
         </div>
 
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <button
+          type="button"
+          onClick={() => loadRooms()}
+          className="p-2 rounded-xl bg-slate-900/60 border border-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+          title="Refresh from database"
+        >
+          <RefreshCw size={13} className={isLoading ? 'animate-spin text-cyan-400' : ''} />
+        </button>
+
         {/* Add Room Button */}
         <button
           type="button"
@@ -115,7 +155,19 @@ export default function LabStationManager() {
           <Plus size={14} />
           <span>Register New Lab Room</span>
         </button>
+        </div>
       </div>
+
+      {loadError && (
+        <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300">
+          Could not load lab rooms from the database: {loadError}
+        </div>
+      )}
+      {!isLoading && !loadError && rooms.length === 0 && (
+        <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-center text-xs text-slate-400">
+          No lab rooms registered yet.
+        </div>
+      )}
 
       {/* Grid of Lab Rooms */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
@@ -131,7 +183,7 @@ export default function LabStationManager() {
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm font-black text-cyan-400">{room.code}</span>
                     <span
-                      onClick={() => handleToggleStatus(room.id)}
+                      onClick={() => handleToggleStatus(room)}
                       className={`cursor-pointer px-2 py-0.5 rounded text-[10px] font-bold border transition-colors ${
                         room.status === 'OPERATIONAL'
                           ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25'
@@ -155,18 +207,18 @@ export default function LabStationManager() {
             {/* Capacity & Active Stations */}
             <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 space-y-1.5">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-400">Station Capacity:</span>
-                <span className="font-mono font-bold text-slate-200">{room.activeStations} / {room.capacity} PCs</span>
+                <span className="text-slate-400">Operational PCs:</span>
+                <span className="font-mono font-bold text-slate-200">{room.operationalPcs} / {room.totalPcs} PCs</span>
               </div>
               <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500"
-                  style={{ width: `${Math.round((room.activeStations / room.capacity) * 100)}%` }}
+                  style={{ width: `${room.totalPcs > 0 ? Math.round((room.operationalPcs / room.totalPcs) * 100) : 0}%` }}
                 />
               </div>
               <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono pt-1">
                 <span>Cluster Master:</span>
-                <span className="text-indigo-400 font-semibold">{room.clusterMaster}</span>
+                <span className="text-indigo-400 font-semibold">{room.clusterMaster || '—'}</span>
               </div>
             </div>
 
@@ -186,22 +238,24 @@ export default function LabStationManager() {
               </div>
 
               <div className="flex flex-wrap gap-1">
+                {room.mappedMacs.length === 0 && (
+                  <span className="text-[10px] text-slate-500 italic">No ESP32 boards mapped yet</span>
+                )}
                 {room.mappedMacs.map((mac) => (
                   <span
                     key={mac}
                     className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-300 border border-slate-700"
                   >
                     <span>{mac}</span>
-                    {room.mappedMacs.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveMac(room.id, mac)}
-                        className="text-slate-500 hover:text-rose-400"
-                        title="Unmap MAC"
-                      >
-                        ×
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => handleRemoveMac(room, mac)}
+                      className="text-slate-500 hover:text-rose-400 disabled:opacity-40"
+                      title="Unmap MAC"
+                    >
+                      ×
+                    </button>
                   </span>
                 ))}
               </div>
@@ -218,8 +272,9 @@ export default function LabStationManager() {
                   />
                   <button
                     type="button"
-                    onClick={() => handleAddMacToRoom(room.id)}
-                    className="px-2.5 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-semibold"
+                    disabled={isSaving}
+                    onClick={() => handleAddMacToRoom(room)}
+                    className="px-2.5 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-semibold disabled:opacity-50"
                   >
                     Save
                   </button>
@@ -276,7 +331,7 @@ export default function LabStationManager() {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">PC Capacity *</label>
+                  <label className="block text-slate-300 font-semibold mb-1">Number of PCs *</label>
                   <input
                     type="number"
                     min={1}
@@ -331,10 +386,10 @@ export default function LabStationManager() {
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Primary ESP32 MAC Address</label>
+                <label className="block text-slate-300 font-semibold mb-1">Primary ESP32 MAC Address <span className="text-slate-500 font-normal">(optional)</span></label>
                 <input
                   type="text"
-                  placeholder="24:6F:28:B1:3C:XX"
+                  placeholder="e.g. 24:6F:28:B1:3C:99"
                   value={newMac}
                   onChange={(e) => setNewMac(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 focus:border-cyan-500 focus:outline-none font-mono"
@@ -351,9 +406,10 @@ export default function LabStationManager() {
                 </button>
                 <button
                   type="submit"
-                  className="py-2 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-glow-cyan"
+                  disabled={isSaving}
+                  className="py-2 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-glow-cyan disabled:opacity-50"
                 >
-                  Register Room
+                  {isSaving ? 'Registering…' : 'Register Room'}
                 </button>
               </div>
             </form>

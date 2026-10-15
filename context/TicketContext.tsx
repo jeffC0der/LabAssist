@@ -59,6 +59,15 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
     refreshTickets();
   }, [refreshTickets]);
 
+  // Periodic refresh: live database events only reach staff, so students pick up ticket
+  // status changes this way (paused while the tab is hidden)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') refreshTickets();
+    }, 20000);
+    return () => clearInterval(interval);
+  }, [refreshTickets]);
+
   // Reload when the user signs in or out: the API only returns data for the signed-in caller
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange((event) => {

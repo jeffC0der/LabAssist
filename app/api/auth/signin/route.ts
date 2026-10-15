@@ -2,21 +2,23 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { checkLockout, recordFailedAttempt, resetLockout, markEmailNotified } from '@/lib/lockoutStore';
 import { dispatchBrevoLockoutEmail } from '@/lib/lockoutEmail';
-import { getServiceClient } from '@/lib/serverAuth';
+import { getServiceClient, requiresLoginOtp, sessionIdFromToken, markSessionVerified } from '@/lib/serverAuth';
+import { verifyAndConsumeOtp } from '@/lib/otpStore';
+import { issueAndSendOtp } from '@/lib/otpEmail';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 /**
  * POST /api/auth/signin
- * Body: { email: string, password: string }
+ * Body: { email: string, password: string, otpCode?: string }
  *
  * Password sign-in performed on the server so login lockouts are based on real password checks:
  * the server enforces the lock, counts the failure itself, and only then returns a Supabase
  * session ({ access_token, refresh_token }) that the browser installs with supabase.auth.setSession().
  */
 export async function POST(request: Request) {
-  let body: { email?: string; password?: string };
+  let body: { email?: string; password?: string; otpCode?: string };
   try {
     body = await request.json();
   } catch {
@@ -25,6 +27,7 @@ export async function POST(request: Request) {
 
   const email = (body.email || '').trim().toLowerCase();
   const password = body.password || '';
+  const otpCode = typeof body.otpCode === 'string' ? body.otpCode.trim() : '';
   if (!email || !password) {
     return NextResponse.json({ success: false, error: 'Email and password are required.' }, { status: 400 });
   }
@@ -98,8 +101,41 @@ export async function POST(request: Request) {
       );
     }
 
-    // 3. Success clears the failure count and hands the session to the browser
+    // 3. Correct password clears the failure count
     await resetLockout(email);
+
+    // 4. Two-factor accounts: the session is only handed over together with a valid emailed code
+    if (requiresLoginOtp(data.user)) {
+      if (!otpCode) {
+        // Discard this session and email a login code
+        await authClient.auth.signOut();
+        const sent = await issueAndSendOtp(email, 'login', data.user.user_metadata?.full_name || data.user.user_metadata?.name);
+        return NextResponse.json({
+          success: false,
+          code: 'otp_required',
+          codeSent: sent.ok,
+          // A code sent less than a minute ago is still valid
+          error: sent.ok || sent.status === 429 ? undefined : sent.error,
+        });
+      }
+
+      const verification = await verifyAndConsumeOtp(email, otpCode, 'login');
+      if (!verification.valid) {
+        await authClient.auth.signOut();
+        return NextResponse.json(
+          { success: false, code: 'invalid_otp', error: verification.error || 'Invalid or expired verification code.' },
+          { status: 400 }
+        );
+      }
+
+      const sessionId = sessionIdFromToken(data.session.access_token);
+      if (!sessionId) {
+        return NextResponse.json({ success: false, error: 'Could not start a verified session.' }, { status: 500 });
+      }
+      await markSessionVerified(sessionId, data.user.id);
+    }
+
+    // 5. Hand the session to the browser
     return NextResponse.json({
       success: true,
       session: {

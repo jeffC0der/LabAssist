@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { verifyAndConsumeOtp } from '@/lib/otpStore';
-import { getServiceClient } from '@/lib/serverAuth';
+import { getServiceClient, getSessionUser, markSessionVerified } from '@/lib/serverAuth';
 import { issueResetToken } from '@/lib/resetToken';
 
 interface VerifyOtpRequestBody {
@@ -190,6 +190,15 @@ export async function POST(request: Request) {
         role = await ensureProfile(supabaseAdmin, targetUser.id, cleanEmail, cleanName, assignedRole, assignedDept);
       }
     } catch {}
+
+    // Google sign-ins already hold a Supabase session: a verified login code completes two-factor
+    // login for that session (only if it belongs to the same account)
+    if (purpose === 'login' || purpose === 'oauth_signup') {
+      const caller = await getSessionUser(request);
+      if (caller && caller.email === cleanEmail && caller.sessionId) {
+        await markSessionVerified(caller.sessionId, caller.id);
+      }
+    }
 
     return NextResponse.json({
       success: true,

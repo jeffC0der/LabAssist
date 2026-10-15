@@ -90,10 +90,6 @@ export async function POST(request: Request) {
         .eq('email', lowerEmail);
     } catch {}
 
-    try {
-      await supabaseAdmin.from('users').update({ role: 'TECHNICIAN' }).eq('email', lowerEmail);
-    } catch {}
-
     return NextResponse.json({ success: true, entry: data });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || 'Failed to add allowlist entry' }, { status: 500 });

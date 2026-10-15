@@ -26,14 +26,11 @@ export default function AuthCallbackPage() {
           process.env.NEXT_PUBLIC_REQUIRE_OTP === 'false';
 
         // Check if user already has a verified record in the database.
-        const [{ data: profileRow }, { data: userRow }] = await Promise.all([
-          supabase.from('profiles').select('id, role').eq('id', user.id).maybeSingle(),
-          supabase.from('users').select('id, role').eq('id', user.id).maybeSingle(),
-        ]);
+        const { data: profileRow } = await supabase.from('profiles').select('id, role').eq('id', user.id).maybeSingle();
 
         // Security Gate: new Google accounts must be @umak.edu.ph; outside accounts may only
         // sign in if they already exist (e.g. staff added by an admin)
-        if (!isUmakEmail(email) && !profileRow && !userRow) {
+        if (!isUmakEmail(email) && !profileRow) {
           setStatusMsg('Access restricted: Only @umak.edu.ph accounts are authorized.');
           try {
             await supabase.auth.signOut();
@@ -43,7 +40,7 @@ export default function AuthCallbackPage() {
         }
 
         // If user has Login OTP (2FA) enabled
-        if (meta.require_login_otp) {
+        if (user.app_metadata?.require_login_otp === true) {
           setStatusMsg('Two-factor verification enabled — sending login code…');
           try {
             await fetch('/api/send-otp', {
@@ -61,9 +58,9 @@ export default function AuthCallbackPage() {
           return;
         }
 
-        if (isOtpDisabled || profileRow || userRow) {
+        if (isOtpDisabled || profileRow) {
           // If first-time user and OTP is disabled, auto-populate DB records
-          if (!profileRow && !userRow) {
+          if (!profileRow) {
             try {
               await supabase.from('profiles').upsert({
                 id: user.id,
@@ -71,14 +68,6 @@ export default function AuthCallbackPage() {
                 name: fullName,
                 role: 'STUDENT',
                 department: 'Undergraduate Engineering',
-              });
-            } catch {}
-            try {
-              await supabase.from('users').upsert({
-                id: user.id,
-                email,
-                full_name: fullName,
-                role: 'STUDENT',
               });
             } catch {}
           }

@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import {
   X, User, ShieldCheck, Mail, Building2, Save,
   CheckCircle2, KeyRound, AlertCircle, Check,
-  Lock
+  Lock, Eye, EyeOff, ChevronDown
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
@@ -61,7 +61,8 @@ export default function ProfileSettingsModal({
   // Password Change States
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
@@ -216,7 +217,7 @@ export default function ProfileSettingsModal({
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-lg bg-slate-900 border border-slate-750 rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh]"
+        className="relative w-full max-w-lg bg-slate-900 border border-slate-750 rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto h-[min(640px,85vh)]"
         onClick={e => e.stopPropagation()}
       >
         {/* Modal Header */}
@@ -276,8 +277,10 @@ export default function ProfileSettingsModal({
           </button>
         </div>
 
-        {/* Modal Body */}
-        <div className="p-5 overflow-y-auto space-y-4">
+        {/* Modal Body: fixed-height modal, so the header and tabs never move between tabs; content scrolls */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {/* Padding lives on this inner wrapper so the bottom gap is kept when scrolled (equal to the gap under the tabs) */}
+          <div className="p-5 space-y-4">
           {activeTab === 'profile' ? (
             /* TAB 1: Profile Details (Full Name & Department) */
             <form onSubmit={handleSaveProfile} className="space-y-4">
@@ -326,18 +329,25 @@ export default function ProfileSettingsModal({
                   <Building2 size={12} className="text-indigo-400" />
                   Department / College <span className="text-rose-400">*</span>
                 </label>
-                <select
-                  id="modal-department"
-                  value={department}
-                  onChange={e => setDepartment(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950/70 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/40 transition-colors cursor-pointer"
-                >
-                  {DEPARTMENTS.map(d => (
-                    <option key={d} value={d} className="bg-slate-900 text-slate-100">
-                      {d}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    id="modal-department"
+                    value={department}
+                    onChange={e => setDepartment(e.target.value)}
+                    className="w-full appearance-none pl-3 pr-9 py-2 rounded-xl bg-slate-950/70 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/40 transition-colors cursor-pointer"
+                  >
+                    {DEPARTMENTS.map(d => (
+                      <option key={d} value={d} className="bg-slate-900 text-slate-100">
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    size={14}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                    aria-hidden="true"
+                  />
+                </div>
 
                 {department === 'Other / Department Not Listed' && (
                   <div className="mt-2 animate-fade-in">
@@ -484,13 +494,25 @@ export default function ProfileSettingsModal({
                 <form onSubmit={handleChangePassword} className="space-y-2.5">
                   <div className="space-y-1">
                     <label className="text-[11px] font-semibold text-slate-400">New Password</label>
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={newPassword}
-                      onChange={e => setNewPassword(e.target.value)}
-                      placeholder="Enter new password (min. 16 chars)"
-                      className="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/40"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showNewPassword ? 'text' : 'password'}
+                        autoComplete="new-password"
+                        value={newPassword}
+                        onChange={e => setNewPassword(e.target.value)}
+                        placeholder="Enter new password (min. 16 chars)"
+                        className="w-full pl-3 pr-9 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/40"
+                      />
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() => setShowNewPassword(v => !v)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                        aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}
+                      >
+                        {showNewPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
                   </div>
 
                   {newPassword.length > 0 && (
@@ -499,24 +521,28 @@ export default function ProfileSettingsModal({
 
                   <div className="space-y-1">
                     <label className="text-[11px] font-semibold text-slate-400">Confirm New Password</label>
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={confirmPassword}
-                      onChange={e => setConfirmPassword(e.target.value)}
-                      placeholder="Re-enter new password"
-                      className="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/40"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        autoComplete="new-password"
+                        value={confirmPassword}
+                        onChange={e => setConfirmPassword(e.target.value)}
+                        placeholder="Re-enter new password"
+                        className="w-full pl-3 pr-9 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/40"
+                      />
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() => setShowConfirmPassword(v => !v)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                        aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                      >
+                        {showConfirmPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex items-center justify-between pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(v => !v)}
-                      className="text-[10px] text-slate-400 hover:text-slate-200 transition-colors"
-                    >
-                      {showPassword ? 'Hide Passwords' : 'Show Passwords'}
-                    </button>
-
+                  <div className="flex items-center justify-end pt-1">
                     <button
                       type="submit"
                       disabled={isChangingPassword || !passwordsMatch || pwdStrength.score < 3}
@@ -534,20 +560,9 @@ export default function ProfileSettingsModal({
                   </div>
                 </form>
               </div>
-
-              {/* Session / Security Info */}
-              <div className="p-3 rounded-xl bg-slate-950/40 border border-slate-800/80 text-[10px] text-slate-400 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span>Session Encryption:</span>
-                  <span className="text-slate-200 font-mono">AES-256-GCM / TLS 1.3</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>Lockout Protection:</span>
-                  <span className="text-emerald-400">Active (6 Attempts / 15m Lock)</span>
-                </div>
-              </div>
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>

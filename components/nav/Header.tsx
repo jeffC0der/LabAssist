@@ -215,16 +215,19 @@ export default function Header() {
                 </div>
 
                 <div className="p-1.5 space-y-1">
-                  <Link
-                    href="/student"
-                    onClick={() => setDropdownOpen(false)}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-slate-700/60 transition-colors"
-                  >
-                    <GraduationCap size={13} className="text-cyan-400" />
-                    <span>Student Portal</span>
-                  </Link>
+                  {/* Each role only sees its own portal (matches the top navigation) */}
+                  {role === 'STUDENT' && (
+                    <Link
+                      href="/student"
+                      onClick={() => setDropdownOpen(false)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-slate-700/60 transition-colors"
+                    >
+                      <GraduationCap size={13} className="text-cyan-400" />
+                      <span>Student Portal</span>
+                    </Link>
+                  )}
 
-                  {(role === 'TECHNICIAN' || role === 'ADMIN') && (
+                  {role === 'TECHNICIAN' && (
                     <Link
                       href="/technician"
                       onClick={() => setDropdownOpen(false)}

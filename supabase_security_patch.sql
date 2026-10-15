@@ -106,3 +106,6 @@ CREATE TABLE IF NOT EXISTS public.otp_codes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ALTER TABLE public.otp_codes ENABLE ROW LEVEL SECURITY;
+
+-- Make the API see the new table immediately
+NOTIFY pgrst, 'reload schema';

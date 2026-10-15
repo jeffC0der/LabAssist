@@ -56,7 +56,6 @@ interface AuthContextValue {
   toggleLoginOtp: (enabled: boolean) => Promise<boolean>;
   requestLoginOtp: (email: string, name?: string) => Promise<void>;
   verifyLoginOtp: (email: string, token: string, password?: string) => Promise<User>;
-  checkEmailRequiresOtp: (email: string) => Promise<{ requireOtp: boolean; name?: string }>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -121,7 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // The role is whatever the database says; it is only changed server-side (Admin Console / allowlist)
         const effectiveRole = ((data.role as UserRole) || 'STUDENT');
 
-        const requireLoginOtp = data.require_login_otp ?? metadata.require_login_otp ?? false;
+        const requireLoginOtp = supabaseUser.app_metadata?.require_login_otp === true;
 
         return {
           id: data.id,
@@ -137,33 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Continue to next check
     }
 
-    // 2. Try public.users table if profiles table is empty/missing
-    try {
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', supabaseUser.id)
-        .maybeSingle();
-
-      if (userData && !userError) {
-        // Legacy users table: never trusted for roles (only profiles.role is authoritative)
-        const effectiveRole: UserRole = 'STUDENT';
-        const requireLoginOtp = userData.require_login_otp ?? metadata.require_login_otp ?? false;
-        return {
-          id: userData.id,
-          name: userData.full_name || userData.name || defaultName,
-          email: userData.email || email,
-          role: effectiveRole,
-          avatar: userData.avatar || getInitials(userData.full_name || defaultName),
-          department: userData.department || metadata.department || 'Undergraduate Engineering',
-          requireLoginOtp: !!requireLoginOtp,
-        };
-      }
-    } catch {
-      // Continue to upsert
-    }
-
-    // 3. New user — NOT yet verified via OTP. Return a skeleton profile without
+    // 2. New user — NOT yet verified via OTP. Return a skeleton profile without
     //    writing to the database. The /auth/callback page and /auth/verify-otp page
     //    own new-user record creation AFTER OTP is confirmed.
     return {
@@ -173,7 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       role: 'STUDENT' as UserRole,
       avatar: getInitials(defaultName),
       department: metadata.department || 'Undergraduate Engineering',
-      requireLoginOtp: !!metadata.require_login_otp,
+      requireLoginOtp: supabaseUser.app_metadata?.require_login_otp === true,
     };
   };
 
@@ -192,8 +165,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // Check active Supabase session
         const { data: { session } } = await supabase.auth.getSession();
+        const onAuthPages = typeof window !== 'undefined' && window.location.pathname.startsWith('/auth');
         if (session?.user && isMounted) {
           const userProfile = await fetchUserProfile(session.user);
+
+          // A two-factor account whose session never passed its code is not signed in
+          // (the /auth pages are where that code gets entered, so leave those alone)
+          if (userProfile.requireLoginOtp && !onAuthPages) {
+            const check = await fetch('/api/user/profile', { cache: 'no-store' }).catch(() => null);
+            const body = check && !check.ok ? await check.json().catch(() => ({})) : {};
+            if (body?.code === 'second_factor_required') {
+              await supabase.auth.signOut();
+              saveUserSession(null);
+              return;
+            }
+          }
+
           saveUserSession(userProfile);
         } else if (isMounted) {
           // A login is only valid with a real Supabase session; drop any stale/edited local copy
@@ -228,8 +215,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const profile = await fetchUserProfile(session.user);
           // Only persist session if the user has a verified DB record
           const hasRecord =
-            !!(await supabase.from('profiles').select('id').eq('id', session.user.id).maybeSingle()).data ||
-            !!(await supabase.from('users').select('id').eq('id', session.user.id).maybeSingle()).data;
+            !!(await supabase.from('profiles').select('id').eq('id', session.user.id).maybeSingle()).data;
           if (hasRecord) {
             saveUserSession(profile);
           }
@@ -282,15 +268,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Password sign-in runs on the server (/api/auth/signin), which enforces the lockout and counts
   // failures from real password checks; the returned Supabase session is then installed here.
-  const passwordSignIn = useCallback(async (email: string, password: string) => {
+  const passwordSignIn = useCallback(async (email: string, password: string, otpCode?: string) => {
     const res = await fetch('/api/auth/signin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+      body: JSON.stringify({ email: email.trim().toLowerCase(), password, ...(otpCode ? { otpCode } : {}) }),
     });
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok || !data.success || !data.session) {
+      if (data.code === 'otp_required') {
+        // Password was correct; the account uses two-factor login and a code was emailed
+        const err: any = new Error(data.error || 'Enter the verification code sent to your email.');
+        err.otpRequired = true;
+        err.codeSent = !!data.codeSent;
+        throw err;
+      }
       if (data.code === 'locked') {
         const err: any = new Error(
           'Account temporarily locked. Your account will automatically unlock when the timer expires.'
@@ -342,18 +335,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Access restricted: Only @umak.edu.ph email addresses are authorized to register.');
       }
 
-      // Check if user already exists in profiles
-      const { data: existingProfile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('email', trimmedEmail)
-        .maybeSingle();
-
-      if (existingProfile) {
-        throw new Error('An account with this email address already exists.');
-      }
-
-      // Dispatch Brevo OTP via API
+      // Dispatch Brevo OTP via API (the server refuses if the email is already registered)
       const res = await fetch('/api/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -574,13 +556,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const email = (data.user.email || '').toLowerCase().trim();
 
       // Check if profile exists
-      const [{ data: profileRow }, { data: userRow }] = await Promise.all([
-        supabase.from('profiles').select('id').eq('id', data.user.id).maybeSingle(),
-        supabase.from('users').select('id').eq('id', data.user.id).maybeSingle(),
-      ]);
+      const { data: profileRow } = await supabase.from('profiles').select('id').eq('id', data.user.id).maybeSingle();
 
       // Non-UMak Google accounts may only sign in to accounts that already exist (e.g. staff added by an admin)
-      if (!isUmakEmail(email) && !profileRow && !userRow) {
+      if (!isUmakEmail(email) && !profileRow) {
         await supabase.auth.signOut();
         throw new Error('Access restricted: Only Google accounts with the @umak.edu.ph domain are authorized.');
       }
@@ -596,7 +575,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw err;
       }
 
-      const isNewUser = !profileRow && !userRow;
+      const isNewUser = !profileRow;
       const fullName = data.user.user_metadata?.full_name || data.user.user_metadata?.name || email.split('@')[0];
 
       if (isNewUser) {
@@ -610,7 +589,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const profile = await fetchUserProfile(data.user);
 
       // Check if user account has OTP required on login
-      const isOtpRequired = !!profile.requireLoginOtp || !!data.user.user_metadata?.require_login_otp;
+      const isOtpRequired = data.user.app_metadata?.require_login_otp === true;
 
       if (isOtpRequired) {
         // Dispatch Brevo OTP email for login
@@ -669,22 +648,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const email = (currentUser.email || '').toLowerCase().trim();
       const fullName = currentUser.user_metadata?.full_name || currentUser.user_metadata?.name || email.split('@')[0];
 
-      // Upsert user profile records
-      await Promise.all([
-        supabase.from('profiles').upsert({
-          id: currentUser.id,
-          email,
-          name: fullName,
-          role: 'STUDENT',
-          department: 'Undergraduate Engineering',
-        }),
-        supabase.from('users').upsert({
-          id: currentUser.id,
-          email,
-          full_name: fullName,
-          role: 'STUDENT',
-        }),
-      ]);
+      // Upsert the profile record (the database decides the role for new accounts)
+      await supabase.from('profiles').upsert({
+        id: currentUser.id,
+        email,
+        name: fullName,
+        role: 'STUDENT',
+        department: 'Undergraduate Engineering',
+      });
 
       const profile = await fetchUserProfile(currentUser);
       saveUserSession(profile);
@@ -822,22 +793,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!user) throw new Error('No active user session found.');
 
     try {
-      // 1. Update via server API
-      await fetch('/api/user/profile', {
+      // 1. Update via server API (the setting lives in server-only app_metadata)
+      const res = await fetch('/api/user/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          email: user.email,
-          requireLoginOtp: enabled,
-        }),
+        body: JSON.stringify({ requireLoginOtp: enabled }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error || 'Could not update two-factor login. Please try again.');
+      }
 
-      // 2. Update Supabase metadata
+      // 2. Refresh the token so it carries the new setting (same session, so it stays verified)
       try {
-        await supabase.auth.updateUser({
-          data: { require_login_otp: enabled },
-        });
+        await supabase.auth.refreshSession();
       } catch { }
 
       // 3. Update active session
@@ -854,23 +823,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user]);
 
-  // Quick check if email requires OTP on login
-  const checkEmailRequiresOtp = useCallback(async (email: string): Promise<{ requireOtp: boolean; name?: string }> => {
-    try {
-      const res = await fetch('/api/user/otp-status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase() }),
-      });
-      const data = await res.json();
-      return {
-        requireOtp: !!data?.requireLoginOtp,
-        name: data?.name,
-      };
-    } catch {
-      return { requireOtp: false };
-    }
-  }, []);
 
   // Request OTP for login
   const requestLoginOtp = useCallback(async (email: string, name?: string): Promise<void> => {
@@ -901,6 +853,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     try {
       const cleanEmail = email.trim().toLowerCase();
+
+      // Password login: the server checks password + code together before issuing the session
+      if (password) {
+        const authUser = await passwordSignIn(cleanEmail, password, token.trim());
+        const profile = await fetchUserProfile(authUser);
+        saveUserSession(profile);
+        return profile;
+      }
+
+      // Google login: the session already exists; verifying the code marks it as two-factor verified
       const res = await fetch('/api/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -914,15 +876,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Invalid or expired verification code.');
-      }
-
-      // If password provided, sign in through the server to acquire a full session
-      // (wrong passwords count toward the lockout like any other sign-in)
-      if (password) {
-        const authUser = await passwordSignIn(cleanEmail, password);
-        const profile = await fetchUserProfile(authUser);
-        saveUserSession(profile);
-        return profile;
       }
 
       // Check current session
@@ -979,7 +932,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         toggleLoginOtp,
         requestLoginOtp,
         verifyLoginOtp,
-        checkEmailRequiresOtp,
       }}
     >
       {children}

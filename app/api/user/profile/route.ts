@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { requireAuth } from '@/lib/serverAuth';
+import { requireAuth, markSessionVerified } from '@/lib/serverAuth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -84,36 +84,33 @@ export async function POST(request: Request) {
         }
       }
 
-      // 2. Also update public.users if exists
-      const usersTableData: Record<string, any> = {};
-      if (name !== undefined) usersTableData.full_name = name.trim();
-      if (department !== undefined) usersTableData.department = department.trim();
-
-      if (Object.keys(usersTableData).length > 0) {
-        try {
-          if (targetUserId) {
-            await supabaseAdmin.from('users').update(usersTableData).eq('id', targetUserId);
-          } else if (cleanEmail) {
-            await supabaseAdmin.from('users').update(usersTableData).eq('email', cleanEmail);
-          }
-        } catch {}
-      }
-
       // 3. Update auth user_metadata so it persists reliably across sessions
       if (targetUserId) {
         try {
           const { data: targetUser } = await supabaseAdmin.auth.admin.getUserById(targetUserId);
           const currentMeta = targetUser?.user?.user_metadata || {};
-          const newMeta = {
+          const newMeta: Record<string, any> = {
             ...currentMeta,
             ...(name !== undefined ? { full_name: name.trim(), name: name.trim() } : {}),
             ...(department !== undefined ? { department: department.trim() } : {}),
-            ...(requireLoginOtp !== undefined ? { require_login_otp: requireLoginOtp } : {}),
           };
+          delete newMeta.require_login_otp; // legacy, user-editable copy is no longer used
+
+          // The two-factor switch lives in app_metadata, which only the server can write
+          const appMeta =
+            requireLoginOtp !== undefined
+              ? { ...(targetUser?.user?.app_metadata || {}), require_login_otp: !!requireLoginOtp }
+              : undefined;
 
           await supabaseAdmin.auth.admin.updateUserById(targetUserId, {
             user_metadata: newMeta,
+            ...(appMeta ? { app_metadata: appMeta } : {}),
           });
+
+          // Turning two-factor on keeps the session the user is already signed in with
+          if (requireLoginOtp === true && auth.user.sessionId) {
+            await markSessionVerified(auth.user.sessionId, targetUserId);
+          }
         } catch (authErr) {
           console.warn('[api/user/profile] Error updating auth metadata:', authErr);
         }

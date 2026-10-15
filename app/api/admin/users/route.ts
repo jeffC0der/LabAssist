@@ -108,15 +108,6 @@ export async function POST(request: Request) {
       console.warn('profiles update error:', e);
     }
 
-    // 2. Update users table if exists
-    try {
-      if (userId) {
-        await supabaseAdmin.from('users').update({ role: newRole }).eq('id', userId);
-      } else if (lowerEmail) {
-        await supabaseAdmin.from('users').update({ role: newRole }).eq('email', lowerEmail);
-      }
-    } catch {}
-
     // 3. Update auth user metadata
     if (userId) {
       try {
