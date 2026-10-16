@@ -1,10 +1,12 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import WorkstationGrid from './WorkstationGrid';
 import TicketSubmissionForm from './TicketSubmissionForm';
 import MyTicketsTracker from './MyTicketsTracker';
 import HardwareLoanerCard from './HardwareLoanerCard';
 import RepairServiceCard from './RepairServiceCard';
+import NotificationsPanel from './NotificationsPanel';
+import { useNotifications, OPEN_PORTAL_TAB_EVENT } from '@/context/NotificationContext';
 import { useTickets } from '@/context/TicketContext';
 import { useWorkstations } from '@/context/WorkstationContext';
 import { useAuth } from '@/context/AuthContext';
@@ -21,9 +23,10 @@ import {
   Layers,
   ArrowUpRight,
   Wrench,
+  Bell,
 } from 'lucide-react';
 
-export type StudentNavTab = 'PC_STATION' | 'SUBMIT_TICKET' | 'HARDWARE_RENT' | 'REPAIR_SERVICE';
+export type StudentNavTab = 'PC_STATION' | 'SUBMIT_TICKET' | 'HARDWARE_RENT' | 'REPAIR_SERVICE' | 'NOTIFICATIONS';
 
 interface TabConfig {
   id: StudentNavTab;
@@ -31,7 +34,7 @@ interface TabConfig {
   sublabel: string;
   icon: React.ReactNode;
   activeColor: string;
-  badge?: (props: { activeTicketCount: number; onlinePcCount: number }) => React.ReactNode;
+  badge?: (props: { activeTicketCount: number; onlinePcCount: number; unreadNotificationCount: number }) => React.ReactNode;
 }
 
 const NAV_TABS: TabConfig[] = [
@@ -84,7 +87,28 @@ const NAV_TABS: TabConfig[] = [
       </span>
     ),
   },
+  {
+    id: 'NOTIFICATIONS',
+    label: 'Notifications',
+    sublabel: 'Updates on Your Reports & Repairs',
+    icon: <Bell size={18} />,
+    activeColor: 'from-rose-500/20 to-indigo-500/10 border-rose-500/40 text-rose-300',
+    badge: ({ unreadNotificationCount }) => (
+      <span
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold border ${
+          unreadNotificationCount > 0
+            ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+            : 'bg-slate-800 text-slate-400 border-slate-700'
+        }`}
+      >
+        {unreadNotificationCount > 0 ? `${unreadNotificationCount} New` : 'All read'}
+      </span>
+    ),
+  },
 ];
+
+const isStudentNavTab = (value: unknown): value is StudentNavTab =>
+  typeof value === 'string' && NAV_TABS.some((t) => t.id === value);
 
 export default function StudentPortal() {
   const [activeTab, setActiveTab] = useState<StudentNavTab>('PC_STATION');
@@ -96,6 +120,21 @@ export default function StudentPortal() {
   const { tickets } = useTickets();
   const { workstations } = useWorkstations();
   const { user } = useAuth();
+  const { unreadCount: unreadNotificationCount } = useNotifications();
+
+  // Open a tab from the URL (?tab=NOTIFICATIONS, used by the bell's "Show All")
+  // or from the bell while already on this page
+  useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get('tab');
+    if (isStudentNavTab(fromUrl)) setActiveTab(fromUrl);
+
+    const onOpenTab = (e: Event) => {
+      const tab = (e as CustomEvent).detail;
+      if (isStudentNavTab(tab)) setActiveTab(tab);
+    };
+    window.addEventListener(OPEN_PORTAL_TAB_EVENT, onOpenTab);
+    return () => window.removeEventListener(OPEN_PORTAL_TAB_EVENT, onOpenTab);
+  }, []);
 
   const isPrivilegedUser = user?.role === 'TECHNICIAN' || user?.role === 'ADMIN';
 
@@ -208,7 +247,7 @@ export default function StudentPortal() {
                     </div>
 
                     <div className="flex items-center gap-2 pl-2 flex-shrink-0">
-                      {tab.badge && tab.badge({ activeTicketCount, onlinePcCount })}
+                      {tab.badge && tab.badge({ activeTicketCount, onlinePcCount, unreadNotificationCount })}
                       <ChevronRight
                         size={16}
                         className={`hidden lg:block transition-transform duration-200 ${
@@ -362,6 +401,16 @@ export default function StudentPortal() {
           {activeTab === 'REPAIR_SERVICE' && (
             <section aria-label="Client Device Repair Service and Intake" className="animate-fade-in">
               <RepairServiceCard />
+            </section>
+          )}
+
+          {activeTab === 'NOTIFICATIONS' && (
+            <section aria-label="Notifications" className="animate-fade-in">
+              <NotificationsPanel
+                onOpenTab={(tab) => {
+                  if (isStudentNavTab(tab)) setActiveTab(tab);
+                }}
+              />
             </section>
           )}
         </div>

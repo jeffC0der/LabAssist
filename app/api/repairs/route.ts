@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { sendRepairReceiptEmail, sendReadyForPickupEmail, sendFinalReceiptEmail } from '@/lib/emailService';
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 import { findOverLimitField } from '@/lib/repairLimits';
+import { notifyUser, repairStatusNotification } from '@/lib/notifications';
 import {
   extractWorkflowMetadata,
   packWorkflowMetadata,
@@ -660,6 +661,18 @@ export async function PATCH(request: Request) {
       );
     }
 
+    // ── Appointment must not be scheduled in the past ──
+    // (day-level check: the server may run in another time zone than the technician; the form checks the exact time)
+    if (status === 'CONFIRMED' && typeof confirmedDate === 'string' && confirmedDate) {
+      const endOfDay = new Date(`${confirmedDate}T23:59:59`);
+      if (isNaN(endOfDay.getTime()) || endOfDay.getTime() < Date.now()) {
+        return NextResponse.json(
+          { error: 'The confirmed appointment date cannot be in the past.' },
+          { status: 400 }
+        );
+      }
+    }
+
     // ── Validation for Job Order Completion ──
     if (status === 'COMPLETED') {
       const recipient = (deviceReleasedTo || '').trim();
@@ -670,22 +683,30 @@ export async function PATCH(request: Request) {
         );
       }
 
-      // Check payment requirement: the full invoice total must be received (partial payments are not enough)
-      let billingTotal = Number(totalAmount || currentExt.billing?.totalAmount || existingRecord?.total_amount || 0);
-      let billingPaid = Number(amountPaid ?? currentExt.billing?.amountPaid ?? existingRecord?.amount_paid ?? 0);
+      // Payment requirement: the Job Order must have been billed (a saved invoice) and paid in full.
+      // Only the stored invoice counts — amounts sent by the browser are never trusted here.
+      let billingTotal = Number(currentExt.billing?.totalAmount || 0);
+      let billingPaid = Number(currentExt.billing?.amountPaid || 0);
+      let hasInvoice = !supabase && billingTotal > 0;
       if (supabase) {
         const { data: invRow } = await supabase
           .from('repair_invoices')
           .select('total_amount, amount_paid')
           .eq('rma_number', rmaNumber)
           .maybeSingle();
-        if (invRow) {
-          billingTotal = Number(invRow.total_amount || 0);
-          billingPaid = Number(invRow.amount_paid || 0);
-        }
+        hasInvoice = !!invRow;
+        billingTotal = Number(invRow?.total_amount || 0);
+        billingPaid = Number(invRow?.amount_paid || 0);
       }
-      const isPaid = billingTotal === 0 || billingPaid >= billingTotal;
 
+      if (!hasInvoice) {
+        return NextResponse.json(
+          { error: 'This Job Order has not been billed yet. Create the billing / invoice and record the payment before completing it.' },
+          { status: 400 }
+        );
+      }
+
+      const isPaid = billingTotal - billingPaid < 0.005;
       if (!isPaid) {
         const balance = billingTotal - billingPaid;
         return NextResponse.json(
@@ -888,6 +909,29 @@ export async function PATCH(request: Request) {
         } catch (receiptEmailErr) {
           console.error('[Repair PATCH] Failed to dispatch Final Receipt email:', receiptEmailErr);
         }
+      }
+    }
+
+    // In-app notification for the client when the job moves to a new status
+    if (status && status !== currentStatus) {
+      const content = repairStatusNotification(status, {
+        rma: rmaNumber,
+        device: resolvedDeviceModel || 'device',
+        location: status === 'READY_FOR_PICKUP' ? resolvedLocation : null,
+        appointment:
+          status === 'CONFIRMED'
+            ? { date: confirmedDate || null, time: confirmedTime || null, location: confirmedLocation || null }
+            : null,
+      });
+      if (content) {
+        await notifyUser({
+          userId: existingRecord?.user_id,
+          email: resolvedEmail,
+          category: 'REPAIR',
+          ...content,
+          linkTab: 'REPAIR_SERVICE',
+          refId: rmaNumber,
+        });
       }
     }
 

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { MOCK_TICKETS, type Ticket, type TicketStatus } from '@/lib/mockData';
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
+import { notifyUser } from '@/lib/notifications';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -201,6 +202,7 @@ export async function PATCH(request: Request) {
       let targetPc = pcNum;
       let targetAssignee = assignee;
       let targetCategory = 'Hardware';
+      let existingTicketRow: any = null;
 
       // Pre-lookup ticket to get exact lab and PC
       try {
@@ -211,6 +213,7 @@ export async function PATCH(request: Request) {
           .single();
 
         if (existingTicket) {
+          existingTicketRow = existingTicket;
           targetLab = targetLab || existingTicket.lab_id;
           targetPc = targetPc || existingTicket.pc_num;
           targetAssignee = targetAssignee || existingTicket.assignee;
@@ -295,6 +298,33 @@ export async function PATCH(request: Request) {
           }
           if (unpaddedPc !== targetPc) {
             await supabase.from('workstations').update({ status: 'ONLINE', active_issue: null }).match({ lab_code: targetLab, pc_num: unpaddedPc });
+          }
+        }
+      }
+
+      // Tell the student who reported it — two notifications per report: technician assigned, and resolved
+      // (only when the status actually changed)
+      if (existingTicketRow) {
+        const previous = rowToTicket(existingTicketRow);
+        if (previous.status !== status) {
+          const tech = targetAssignee || 'A technician';
+          const where = `${targetLab || previous.lab_id} ${targetPc || previous.pc_num}`;
+          const resolvedNote = typeof notes === 'string' && notes.trim() ? ` Technician note: ${notes.trim()}` : '';
+          const content =
+            status === 'DISPATCHED'
+              ? { title: `Technician assigned to ${ticketId}`, message: `${tech} has been assigned to your ${targetCategory} report for ${where}.` }
+              : status === 'RESOLVED'
+              ? { title: `Issue resolved: ${ticketId}`, message: `Your ${targetCategory} issue on ${where} has been resolved.${resolvedNote}` }
+              : null;
+          if (content) {
+            await notifyUser({
+              userId: previous.userId,
+              email: previous.userEmail,
+              category: 'TICKET',
+              ...content,
+              linkTab: 'SUBMIT_TICKET',
+              refId: ticketId,
+            });
           }
         }
       }

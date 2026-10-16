@@ -6,6 +6,7 @@ import { TicketProvider } from '@/context/TicketContext';
 import { WorkstationProvider } from '@/context/WorkstationContext';
 import { RepairProvider } from '@/context/RepairContext';
 import { LoanerProvider } from '@/context/LoanerContext';
+import { NotificationProvider } from '@/context/NotificationContext';
 import { RoleProvider } from '@/context/RoleContext';
 import { ToastContainer } from '@/components/shared/Toast';
 
@@ -46,8 +47,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <WorkstationProvider>
                   <RepairProvider>
                     <LoanerProvider>
-                      {children}
-                      <ToastContainer />
+                      <NotificationProvider>
+                        {children}
+                        <ToastContainer />
+                      </NotificationProvider>
                     </LoanerProvider>
                   </RepairProvider>
                 </WorkstationProvider>

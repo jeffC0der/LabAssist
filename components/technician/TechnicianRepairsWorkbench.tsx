@@ -66,6 +66,16 @@ const CANCELLATION_REASONS = [
   'Other technician-specified reason',
 ];
 
+// Appointment helpers, in the technician's local time
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const localDateString = (d: Date = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const localTimeString = (d: Date = new Date()) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+const isPastAppointment = (date: string, time: string) => {
+  if (!date) return true;
+  const when = new Date(`${date}T${time || '00:00'}`);
+  return isNaN(when.getTime()) || when.getTime() < Date.now() - 60 * 1000;
+};
+
 export default function TechnicianRepairsWorkbench() {
   const { user } = useAuth();
   const toast = useToast();
@@ -152,7 +162,7 @@ export default function TechnicianRepairsWorkbench() {
     if (evaluationForms[job.id]) {
       return evaluationForms[job.id];
     }
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateString();
     const initial = {
       technicianEvaluation: job.evaluation?.technicianEvaluation || '',
       repairFeasibility: job.evaluation?.repairFeasibility || 'FEASIBLE',
@@ -170,7 +180,7 @@ export default function TechnicianRepairsWorkbench() {
         technicianEvaluation: '',
         repairFeasibility: 'FEASIBLE',
         partsAvailability: 'IN_STOCK',
-        confirmedDate: new Date().toISOString().split('T')[0],
+        confirmedDate: localDateString(),
         confirmedTime: '10:00',
         confirmedLocation: 'LAB-101',
       };
@@ -236,6 +246,11 @@ export default function TechnicianRepairsWorkbench() {
 
     if (!formData.technicianEvaluation.trim()) {
       toast.warning('Evaluation Notes Required', 'Please enter your technician assessment notes before confirming the Job Order.');
+      return;
+    }
+
+    if (isPastAppointment(formData.confirmedDate, formData.confirmedTime)) {
+      toast.warning('Invalid Appointment', 'The confirmed date and time cannot be in the past. Please choose an upcoming schedule.');
       return;
     }
 
@@ -353,10 +368,20 @@ export default function TechnicianRepairsWorkbench() {
     }
     setIsCheckingInvoice(null);
 
-    const totalAmt = invoice ? Number(invoice.totalAmount || 0) : Number(job.billing?.totalAmount || 0);
-    const paidAmt = invoice ? Number(invoice.amountPaid || 0) : Number(job.billing?.amountPaid || 0);
+    // A Job Order can only be completed once it has been billed (an invoice exists) and fully paid
+    if (!invoice) {
+      toast.warning(
+        'Billing Required',
+        `Job Order ${job.id} has no invoice yet. Create the billing / invoice and record the payment before completing it.`
+      );
+      handleOpenBillingModal(job);
+      return;
+    }
+
+    const totalAmt = Number(invoice.totalAmount || 0);
+    const paidAmt = Number(invoice.amountPaid || 0);
     const balanceAmt = Math.max(0, totalAmt - paidAmt);
-    const isPaid = totalAmt === 0 || balanceAmt === 0;
+    const isPaid = balanceAmt < 0.005;
 
     if (isPaid) {
       // CASE 1 — Already Paid in Full (or 0 balance): Allow technician to proceed to device release
@@ -866,7 +891,7 @@ export default function TechnicianRepairsWorkbench() {
       console.warn('Failed to load invoice from API:', err);
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = localDateString();
     const now = new Date();
     const mmdd = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
     const fallbackInvoice = {
@@ -1490,6 +1515,7 @@ export default function TechnicianRepairsWorkbench() {
                             </label>
                             <input
                               type="date"
+                              min={localDateString()}
                               value={formState.confirmedDate}
                               onChange={(e) => handleFormChange(job.id, 'confirmedDate', e.target.value)}
                               className="w-full px-3 py-2 rounded-xl text-xs font-mono bg-slate-900 text-slate-100 border border-slate-700 focus:border-purple-400 outline-none"
@@ -1504,6 +1530,7 @@ export default function TechnicianRepairsWorkbench() {
                             </label>
                             <input
                               type="time"
+                              min={formState.confirmedDate === localDateString() ? localTimeString() : undefined}
                               value={formState.confirmedTime}
                               onChange={(e) => handleFormChange(job.id, 'confirmedTime', e.target.value)}
                               className="w-full px-3 py-2 rounded-xl text-xs font-mono bg-slate-900 text-slate-100 border border-slate-700 focus:border-purple-400 outline-none"

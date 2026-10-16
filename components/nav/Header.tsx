@@ -3,7 +3,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { Wifi, User, LogOut, Shield, Wrench, GraduationCap, ChevronDown, Bell, ShieldCheck, UserCog } from 'lucide-react';
+import { Wifi, User, LogOut, Shield, Wrench, GraduationCap, ChevronDown, Bell, ShieldCheck, UserCog, Ticket, CreditCard } from 'lucide-react';
+import { useNotifications, timeAgo, OPEN_PORTAL_TAB_EVENT } from '@/context/NotificationContext';
+import type { AppNotification } from '@/app/api/notifications/route';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ProfileSettingsModal from '@/components/profile/ProfileSettingsModal';
@@ -34,6 +36,33 @@ export default function Header() {
     toast.info('Signed out', 'Session ended safely.');
     router.push('/');
   };
+
+  const { notifications, unreadCount, markRead, markAllRead, refreshNotifications } = useNotifications();
+  const latestNotifications = notifications.slice(0, 5);
+
+  // Students can open the full list / the related section in the portal
+  const openPortalTab = (tab: string) => {
+    setNotifOpen(false);
+    if (typeof window !== 'undefined' && window.location.pathname === '/student') {
+      window.dispatchEvent(new CustomEvent(OPEN_PORTAL_TAB_EVENT, { detail: tab }));
+    } else {
+      router.push(`/student?tab=${encodeURIComponent(tab)}`);
+    }
+  };
+
+  const handleNotificationClick = (n: AppNotification) => {
+    markRead([n.id]);
+    if (role === 'STUDENT' && n.linkTab) openPortalTab(n.linkTab);
+  };
+
+  const categoryIcon = (category: AppNotification['category']) =>
+    category === 'TICKET' ? (
+      <Ticket size={13} className="text-cyan-400" />
+    ) : category === 'REPAIR' ? (
+      <Wrench size={13} className="text-violet-400" />
+    ) : (
+      <CreditCard size={13} className="text-emerald-400" />
+    );
 
   const getRoleBadge = () => {
     switch (role) {
@@ -144,34 +173,77 @@ export default function Header() {
         {/* Right: Notifications & User Profile */}
         <div className="flex items-center gap-2.5 flex-shrink-0">
 
-          {/* Notification bell */}
+          {/* Notification bell: the user's real notifications (newest 5, short titles) */}
           <div className="relative" ref={notifRef}>
             <button
               id="header-notif-btn"
-              onClick={() => setNotifOpen(v => !v)}
+              onClick={() => {
+                if (!notifOpen) refreshNotifications();
+                setNotifOpen(v => !v);
+              }}
               className="relative w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-all"
-              aria-label="Notifications"
+              aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
             >
               <Bell size={16} />
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500 border-2 border-slate-900" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 border-2 border-slate-900 text-[9px] font-bold text-white flex items-center justify-center leading-none">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
             </button>
 
             {notifOpen && (
-              <div className="absolute right-0 top-11 w-72 dropdown-menu p-3 z-50 animate-fade-in text-left">
-                <p className="text-xs font-semibold text-slate-300 mb-2 px-1">Live Telemetry & Alerts</p>
-                {[
-                  { msg: 'ESP32 Cluster LAB-101 heartbeat 12ms', time: 'Just now' },
-                  { msg: 'Ticket TKT-2401 logged by student', time: '4m ago' },
-                  { msg: 'Locker B4 hardware loan approved', time: '14m ago' },
-                ].map((n, i) => (
-                  <div key={i} className="flex gap-2.5 p-2 rounded-lg hover:bg-slate-700/50 transition-colors">
-                    <span className="flex-shrink-0 w-1.5 h-1.5 mt-1.5 rounded-full bg-indigo-400" />
-                    <div>
-                      <p className="text-xs text-slate-300 leading-snug">{n.msg}</p>
-                      <p className="text-[10px] text-slate-500 mt-0.5">{n.time}</p>
-                    </div>
+              <div className="absolute right-0 top-11 w-80 dropdown-menu p-2 z-50 animate-fade-in text-left">
+                <div className="flex items-center justify-between px-2 pt-1 pb-2">
+                  <p className="text-xs font-semibold text-slate-300">Notifications</p>
+                  {unreadCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => markAllRead()}
+                      className="text-[11px] text-indigo-400 hover:text-indigo-300"
+                    >
+                      Mark all read
+                    </button>
+                  )}
+                </div>
+
+                {latestNotifications.length === 0 ? (
+                  <p className="px-2 py-6 text-center text-xs text-slate-500">No notifications yet</p>
+                ) : (
+                  <div className="space-y-0.5">
+                    {latestNotifications.map((n) => (
+                      <button
+                        key={n.id}
+                        type="button"
+                        onClick={() => handleNotificationClick(n)}
+                        className={`w-full flex gap-2.5 p-2 rounded-lg text-left transition-colors hover:bg-slate-700/50 ${
+                          n.isRead ? '' : 'bg-indigo-500/5'
+                        }`}
+                      >
+                        <span className="flex-shrink-0 w-6 h-6 mt-0.5 rounded-md bg-slate-800 flex items-center justify-center">
+                          {categoryIcon(n.category)}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className={`block text-xs leading-snug truncate ${n.isRead ? 'text-slate-400' : 'text-slate-200 font-semibold'}`}>
+                            {n.title}
+                          </span>
+                          <span className="block text-[10px] text-slate-500 mt-0.5">{timeAgo(n.createdAt)}</span>
+                        </span>
+                        {!n.isRead && <span className="flex-shrink-0 w-1.5 h-1.5 mt-2 rounded-full bg-indigo-400" />}
+                      </button>
+                    ))}
                   </div>
-                ))}
+                )}
+
+                {role === 'STUDENT' && (
+                  <button
+                    type="button"
+                    onClick={() => openPortalTab('NOTIFICATIONS')}
+                    className="mt-1.5 w-full py-2 rounded-lg text-xs font-semibold text-indigo-300 bg-slate-800/60 hover:bg-slate-700/60 transition-colors"
+                  >
+                    Show All Notifications
+                  </button>
+                )}
               </div>
             )}
           </div>

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { sendInvoiceNotificationEmail } from '@/lib/emailService';
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
+import { notifyUser, formatPeso } from '@/lib/notifications';
 import {
   getInMemoryInvoice,
   setInMemoryInvoice,
@@ -553,6 +554,7 @@ export async function POST(request: Request) {
     }
 
     // If no existing invoice number found, generate a fresh sequential INV-[QUEUE]-[YEAR]-[MMDD]
+    const isNewInvoice = !invoiceNumber;
     if (!invoiceNumber) {
       invoiceNumber = await generateInvoiceNumber(supabase, new Date());
     }
@@ -653,6 +655,18 @@ export async function POST(request: Request) {
           });
           if (payInsErr) {
             console.error('[Invoices POST] payments ledger insert failed:', payInsErr.message);
+          } else if (delta > 0) {
+            const balance = Math.max(0, totalAmount - resolvedAmountPaid);
+            await notifyUser({
+              email: resolvedEmail,
+              category: 'PAYMENT',
+              title: `Payment received: ${formatPeso(delta)}`,
+              message: `We received ${formatPeso(delta)} for job order ${joNum} (invoice ${invoiceNumber}). ${
+                balance > 0.005 ? `Remaining balance: ${formatPeso(balance)}.` : 'Your invoice is now fully paid.'
+              }`,
+              linkTab: 'REPAIR_SERVICE',
+              refId: joNum,
+            });
           }
         }
       }
@@ -794,6 +808,18 @@ export async function POST(request: Request) {
       }
     } else {
       console.warn(`[Invoices POST] Skipping email dispatch: No registered customer email found for ${joNum}`);
+    }
+
+    // First invoice for this job order: tell the client the amount due
+    if (isNewInvoice && totalAmount > 0) {
+      await notifyUser({
+        email: resolvedEmail,
+        category: 'PAYMENT',
+        title: `Invoice ${invoiceNumber} issued`,
+        message: `An invoice of ${formatPeso(totalAmount)} was issued for job order ${joNum}.`,
+        linkTab: 'REPAIR_SERVICE',
+        refId: joNum,
+      });
     }
 
     return NextResponse.json({
