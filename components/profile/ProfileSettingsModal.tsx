@@ -11,6 +11,7 @@ import { useToast } from '@/context/ToastContext';
 import { checkPasswordStrength } from '@/lib/validators';
 import PasswordStrengthMeter from '@/components/auth/PasswordStrengthMeter';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { supabase } from '@/lib/supabaseClient';
 
 const DEPARTMENTS = [
   'BSIT - Information Technology',
@@ -42,7 +43,7 @@ export default function ProfileSettingsModal({
   onClose,
   initialTab = 'profile',
 }: ProfileSettingsModalProps) {
-  const { user, role, updateProfile, toggleLoginOtp, updateNewPassword } = useAuth();
+  const { user, role, updateProfile, toggleLoginOtp } = useAuth();
   const toast = useToast();
 
   const [mounted, setMounted] = useState(false);
@@ -59,6 +60,8 @@ export default function ProfileSettingsModal({
   const [isTogglingOtp, setIsTogglingOtp] = useState(false);
 
   // Password Change States
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -175,6 +178,7 @@ export default function ProfileSettingsModal({
   // Handle Change Password
   const pwdStrength = checkPasswordStrength(newPassword);
   const passwordsMatch = newPassword === confirmPassword && newPassword.length > 0;
+  const sameAsCurrent = newPassword.length > 0 && newPassword === currentPassword;
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -186,6 +190,16 @@ export default function ProfileSettingsModal({
       return;
     }
 
+    if (!currentPassword) {
+      setPasswordError('Enter your current password.');
+      return;
+    }
+
+    if (sameAsCurrent) {
+      setPasswordError('Your new password must be different from your current password.');
+      return;
+    }
+
     if (!passwordsMatch) {
       setPasswordError('Passwords do not match.');
       return;
@@ -193,8 +207,26 @@ export default function ProfileSettingsModal({
 
     setIsChangingPassword(true);
     try {
-      await updateNewPassword(newPassword, user?.email);
+      // The server re-checks the current password and rejects reusing it
+      const res = await fetch('/api/user/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(
+          res.status === 401 && !data.success && data.error === 'Sign in required.'
+            ? 'Your session has expired. Please sign in again.'
+            : data.error || 'Failed to update password. Please try again.'
+        );
+      }
+      // Changing the password signs every session out; continue with the fresh one from the server
+      if (data.session) {
+        await supabase.auth.setSession(data.session);
+      }
       setPasswordSuccess(true);
+      setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       toast.success('Password Changed', 'Your account password was updated successfully.');
@@ -493,6 +525,29 @@ export default function ProfileSettingsModal({
 
                 <form onSubmit={handleChangePassword} className="space-y-2.5">
                   <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-400">Current Password</label>
+                    <div className="relative">
+                      <input
+                        type={showCurrentPassword ? 'text' : 'password'}
+                        autoComplete="current-password"
+                        value={currentPassword}
+                        onChange={e => setCurrentPassword(e.target.value)}
+                        placeholder="Enter your current password"
+                        className="w-full pl-3 pr-9 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/40"
+                      />
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() => setShowCurrentPassword(v => !v)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                        aria-label={showCurrentPassword ? 'Hide current password' : 'Show current password'}
+                      >
+                        {showCurrentPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
                     <label className="text-[11px] font-semibold text-slate-400">New Password</label>
                     <div className="relative">
                       <input
@@ -514,6 +569,10 @@ export default function ProfileSettingsModal({
                       </button>
                     </div>
                   </div>
+
+                  {sameAsCurrent && (
+                    <p className="text-[11px] text-rose-400">Your new password must be different from your current password.</p>
+                  )}
 
                   {newPassword.length > 0 && (
                     <PasswordStrengthMeter password={newPassword} />
@@ -545,7 +604,7 @@ export default function ProfileSettingsModal({
                   <div className="flex items-center justify-end pt-1">
                     <button
                       type="submit"
-                      disabled={isChangingPassword || !passwordsMatch || pwdStrength.score < 3}
+                      disabled={isChangingPassword || !currentPassword || sameAsCurrent || !passwordsMatch || pwdStrength.score < 3}
                       className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98] disabled:opacity-40 transition-all flex items-center gap-1.5"
                     >
                       {isChangingPassword ? (

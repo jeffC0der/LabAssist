@@ -155,7 +155,7 @@ export default function StudentPortal() {
 
           <div className="flex items-center gap-2 self-start md:self-auto bg-slate-900/80 px-3.5 py-2 rounded-xl border border-slate-800 text-xs text-slate-300">
             <Radio size={16} className="text-cyan-400 animate-pulse" />
-            <span className="font-mono">ESP32 Hardware Hotkeys [A–D] Live</span>
+            <span className="font-mono">Live</span>
           </div>
         </div>
       </div>

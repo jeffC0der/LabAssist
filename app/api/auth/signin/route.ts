@@ -108,7 +108,7 @@ export async function POST(request: Request) {
     if (requiresLoginOtp(data.user)) {
       if (!otpCode) {
         // Discard this session and email a login code
-        await authClient.auth.signOut();
+        await authClient.auth.signOut({ scope: 'local' });
         const sent = await issueAndSendOtp(email, 'login', data.user.user_metadata?.full_name || data.user.user_metadata?.name);
         return NextResponse.json({
           success: false,
@@ -121,7 +121,7 @@ export async function POST(request: Request) {
 
       const verification = await verifyAndConsumeOtp(email, otpCode, 'login');
       if (!verification.valid) {
-        await authClient.auth.signOut();
+        await authClient.auth.signOut({ scope: 'local' });
         return NextResponse.json(
           { success: false, code: 'invalid_otp', error: verification.error || 'Invalid or expired verification code.' },
           { status: 400 }
