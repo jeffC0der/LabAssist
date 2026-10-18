@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireAuth } from '@/lib/serverAuth';
+import { errorResponse, readJson, reqEmail, optStr, optUuid, optEmail } from '@/lib/validation';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -55,12 +56,9 @@ export async function POST(request: Request) {
 
   try {
     const supabaseAdmin = getAdminClient();
-    const { email, department } = await request.json();
-
-    const lowerEmail = (email || '').toLowerCase().trim();
-    if (!lowerEmail || !lowerEmail.includes('@')) {
-      return NextResponse.json({ error: 'Valid email is required.' }, { status: 400 });
-    }
+    const body = await readJson(request);
+    const lowerEmail = reqEmail(body.email);
+    const department = optStr(body.department, 'Department', { max: 100 });
 
     // 1. Insert/upsert into whitelisted_technicians
     const { data, error } = await supabaseAdmin
@@ -92,7 +90,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, entry: data });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Failed to add allowlist entry' }, { status: 500 });
+    return errorResponse(err, 'api/admin/allowlist');
   }
 }
 
@@ -104,8 +102,8 @@ export async function DELETE(request: Request) {
   try {
     const supabaseAdmin = getAdminClient();
     const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    const email = searchParams.get('email');
+    const id = optUuid(searchParams.get('id'), 'Allowlist entry');
+    const email = optEmail(searchParams.get('email'));
 
     if (!id && !email) {
       return NextResponse.json({ error: 'ID or email is required' }, { status: 400 });
@@ -119,6 +117,6 @@ export async function DELETE(request: Request) {
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Failed to delete allowlist entry' }, { status: 500 });
+    return errorResponse(err, 'api/admin/allowlist');
   }
 }

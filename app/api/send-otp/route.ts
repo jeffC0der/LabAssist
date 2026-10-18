@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { issueAndSendOtp } from '@/lib/otpEmail';
 import { getServiceClient } from '@/lib/serverAuth';
+import { reqEmail, optOneOf, optStr, errorResponse } from '@/lib/validation';
+
+const OTP_PURPOSES = ['signup', 'password_reset', 'oauth_signup', 'login', 'verification'] as const;
 
 interface SendOtpRequestBody {
   email?: string;
@@ -21,15 +24,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: 'Invalid JSON request body.' }, { status: 400 });
   }
 
-  const { email, purpose = 'verification', name } = body;
-
-  if (!email || typeof email !== 'string' || !email.trim()) {
-    return NextResponse.json({ success: false, error: 'Recipient email is required.' }, { status: 400 });
-  }
-
-  const cleanEmail = email.trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-    return NextResponse.json({ success: false, error: 'Please provide a valid email address.' }, { status: 400 });
+  let cleanEmail: string, purpose: string, name: string | undefined;
+  try {
+    cleanEmail = reqEmail(body.email, 'Recipient email');
+    purpose = optOneOf(body.purpose, 'purpose', OTP_PURPOSES) || 'verification';
+    name = optStr(body.name, 'Name', { max: 80 });
+  } catch (err) {
+    return errorResponse(err, 'send-otp');
   }
 
   try {
@@ -58,6 +59,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, messageId: result.messageId }, { status: 200 });
   } catch (err: any) {
     console.error('[send-otp] Error:', err);
-    return NextResponse.json({ success: false, error: err?.message || 'Failed to send the code.' }, { status: 500 });
+    return errorResponse(err, 'api/send-otp');
   }
 }

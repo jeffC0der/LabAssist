@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireAuth, getServiceClient, getClientIp, STAFF_ROLES } from '@/lib/serverAuth';
 import { encryptCredential, isCredentialsKeyConfigured } from '@/lib/credentialCrypto';
+import { errorResponse, readJson, optUuid, reqStr, PATTERNS } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -82,7 +83,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ rooms, keyConfigured: isCredentialsKeyConfigured() }, { headers: NO_STORE });
   } catch (err: any) {
     console.error('[pc-credentials] GET error:', err.message);
-    return NextResponse.json({ error: err.message || 'Failed to load credentials', rooms: [] }, { status: 500 });
+    return errorResponse(err, 'api/pc-credentials', { rooms: [] });
   }
 }
 
@@ -99,8 +100,11 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'CREDENTIALS_KEY is not configured on the server.' }, { status: 500 });
     }
     const supabase = db();
-    const body = await request.json().catch(() => ({}));
-    const workstationId: string | null = body.workstationId || null;
+    const body = await readJson(request);
+    const workstationId: string | null = optUuid(body.workstationId, 'PC') || null;
+    if (!workstationId && body.labCode !== undefined) {
+      reqStr(String(body.labCode).toUpperCase(), 'Room', { max: 20, pattern: PATTERNS.labCode });
+    }
 
     // Resolve the target
     let labCode = String(body.labCode || '').trim().toUpperCase();
@@ -171,6 +175,6 @@ export async function PUT(request: Request) {
     return NextResponse.json({ success: true });
   } catch (err: any) {
     console.error('[pc-credentials] PUT error:', err.message);
-    return NextResponse.json({ error: err.message || 'Failed to save credentials' }, { status: 500 });
+    return errorResponse(err, 'api/pc-credentials');
   }
 }

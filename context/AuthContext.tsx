@@ -3,6 +3,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import { supabase } from '@/lib/supabaseClient';
 import { isUmakEmail } from '@/lib/validators';
 import { installApiAuthFetch } from '@/lib/apiAuthFetch';
+import { clearSessionClock, rememberSignOutReason, staleReason } from '@/lib/sessionActivity';
 
 // Every /api/ call from the browser carries the signed-in user's access token
 installApiAuthFetch();
@@ -166,6 +167,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Check active Supabase session
         const { data: { session } } = await supabase.auth.getSession();
         const onAuthPages = typeof window !== 'undefined' && window.location.pathname.startsWith('/auth');
+        // Coming back after the browser/PC was closed: a session idle for 30 min (or older than
+        // 12 h) is ended here, before anything is shown
+        const stale = session?.user ? staleReason() : null;
+        if (stale) {
+          await supabase.auth.signOut({ scope: 'local' });
+          clearSessionClock();
+          rememberSignOutReason(stale);
+          if (isMounted) saveUserSession(null);
+          return;
+        }
         if (session?.user && isMounted) {
           const userProfile = await fetchUserProfile(session.user);
 
@@ -184,6 +195,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           saveUserSession(userProfile);
         } else if (isMounted) {
           // A login is only valid with a real Supabase session; drop any stale/edited local copy
+          clearSessionClock();
           saveUserSession(null);
         }
       } catch {
@@ -216,13 +228,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Only persist session if the user has a verified DB record
           const hasRecord =
             !!(await supabase.from('profiles').select('id').eq('id', session.user.id).maybeSingle()).data;
-          if (hasRecord) {
+          // The session may have been ended meanwhile (e.g. the idle sign-out on page load)
+          const stillSignedIn = !!(await supabase.auth.getSession()).data.session;
+          if (hasRecord && stillSignedIn) {
             saveUserSession(profile);
           }
         } catch {
           // Fallback
         }
       } else if (event === 'SIGNED_OUT') {
+        clearSessionClock();
         saveUserSession(null);
       }
       setIsLoading(false);
@@ -895,10 +910,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     try {
-      await supabase.auth.signOut();
+      // 'local' ends this browser's session only (the default would also sign out other devices)
+      await supabase.auth.signOut({ scope: 'local' });
     } catch {
       // Ignore
     }
+    clearSessionClock();
     saveUserSession(null);
   }, []);
 

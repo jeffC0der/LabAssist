@@ -4,6 +4,7 @@ import { sendRepairReceiptEmail, sendReadyForPickupEmail, sendFinalReceiptEmail 
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 import { findOverLimitField } from '@/lib/repairLimits';
 import { notifyUser, repairStatusNotification } from '@/lib/notifications';
+import { errorResponse, readJson, reqStr, optStr, reqEmail, optEmail, optUuid, optOneOf, optNum, optDate, PATTERNS } from '@/lib/validation';
 import {
   extractWorkflowMetadata,
   packWorkflowMetadata,
@@ -258,6 +259,62 @@ const NO_CACHE_HEADERS = {
   Expires: '0',
 };
 
+// ── Input validation ──
+const REPAIR_STATUSES = ['RECEIVED', 'PENDING_EVALUATION', 'UNDER_EVALUATION', 'EVALUATED', 'CONFIRMED', 'IN_DIAGNOSTICS', 'REPAIR_IN_PROGRESS', 'AWAITING_PARTS', 'READY_FOR_PICKUP', 'COMPLETED', 'CANCELLED'] as const;
+const PAYMENT_TIMINGS = ['PAY_NOW', 'PAY_AFTER_REPAIR'] as const;
+const PAYMENT_STATUSES = ['UNPAID', 'PARTIALLY_PAID', 'PAID', 'PENDING', 'REFUNDED'] as const;
+const PAYMENT_METHODS = ['CASH', 'ONLINE', 'GCASH', 'MAYA', 'BANK_TRANSFER'] as const;
+
+function validateRepairIntake(b: Record<string, any>) {
+  reqStr(b.clientName, 'Client name', { max: 80 });
+  reqEmail(b.clientEmail, 'Client email');
+  optStr(b.clientPhone, 'Phone', { max: 20 });
+  optStr(b.clientDepartment, 'Department', { max: 100 });
+  optStr(b.deviceType, 'Device type', { max: 30 });
+  reqStr(b.deviceModel, 'Device model', { max: 80 });
+  optStr(b.serialNumber, 'Serial number', { max: 50 });
+  optStr(b.osSpecs, 'OS / specs', { max: 200 });
+  reqStr(b.reportedIssue, 'Reported issue', { max: 1000 });
+  optStr(b.additionalInspectionNotes, 'Inspection remarks', { max: 500 });
+  optUuid(b.userId, 'User');
+  optOneOf(b.paymentTiming, 'Payment timing', PAYMENT_TIMINGS);
+}
+
+function validateRepairUpdate(b: Record<string, any>) {
+  reqStr(b.rmaNumber, 'Job order', { max: 40, pattern: PATTERNS.jobOrder });
+  optOneOf(b.status, 'Status', REPAIR_STATUSES);
+  optStr(b.technicianName, 'Technician', { max: 80 });
+  optStr(b.technicianId, 'Technician', { max: 64, pattern: /^[A-Za-z0-9_-]+$/ });
+  optStr(b.technicianNotes, 'Technician notes', { max: 2000 });
+  optStr(b.partsReplaced, 'Parts replaced', { max: 500 });
+  optOneOf(b.priority, 'Priority', ['LOW', 'MEDIUM', 'HIGH'] as const);
+  optStr(b.technicianEvaluation, 'Evaluation', { max: 2000 });
+  optOneOf(b.repairFeasibility, 'Repair feasibility', ['FEASIBLE', 'NOT_FEASIBLE', 'BER_BEYOND_ECONOMIC_REPAIR', 'PENDING'] as const);
+  optOneOf(b.partsAvailability, 'Parts availability', ['IN_STOCK', 'TO_ORDER', 'CLIENT_PROVIDED', 'NOT_AVAILABLE'] as const);
+  optStr(b.confirmedDate, 'Appointment date', { max: 10, pattern: /^\d{4}-\d{2}-\d{2}$/ });
+  optStr(b.confirmedTime, 'Appointment time', { max: 8, pattern: /^\d{2}:\d{2}(:\d{2})?$/ });
+  optStr(b.confirmedLocation, 'Repair room', { max: 120 });
+  optUuid(b.evaluatorId, 'Evaluator');
+  optStr(b.deviceReleasedTo, 'Released to', { max: 80 });
+  optDate(b.completedAt, 'Completed at');
+  optStr(b.cancellationReason, 'Cancellation reason', { max: 100 });
+  optStr(b.cancellationDescription, 'Cancellation details', { max: 1000 });
+  optDate(b.cancelledAt, 'Cancelled at');
+  optStr(b.cancelledBy, 'Cancelled by', { max: 80 });
+  optOneOf(b.paymentTiming, 'Payment timing', PAYMENT_TIMINGS);
+  optOneOf(b.paymentStatus, 'Payment status', PAYMENT_STATUSES);
+  optOneOf(b.paymentMethod, 'Payment method', PAYMENT_METHODS);
+  optNum(b.totalAmount, 'Total amount', { min: 0, max: 10_000_000 });
+  optNum(b.amountPaid, 'Amount paid', { min: 0, max: 10_000_000 });
+  optStr(b.onlinePaymentReference, 'Payment reference', { max: 100 });
+  optDate(b.settlementDate, 'Settlement date');
+  optStr(b.pickupLocation, 'Pickup location', { max: 120 });
+  optDate(b.readyAt, 'Ready at');
+  optEmail(b.clientEmail, 'Client email');
+  optStr(b.clientName, 'Client name', { max: 80 });
+  optStr(b.deviceModel, 'Device model', { max: 80 });
+}
+
 // ── GET: Fetch all device repair records ──
 export async function GET(request: Request) {
   const auth = await requireAuth(request);
@@ -330,7 +387,9 @@ export async function POST(request: Request) {
   const supabase = getSupabaseAdmin();
 
   try {
-    const body = await request.json();
+    const body = await readJson(request);
+    validateRepairIntake(body);
+    if (!STAFF_ROLES.includes(auth.user.role)) body.userId = auth.user.id; // students file under their own account
     const {
       clientName,
       clientEmail,
@@ -481,7 +540,7 @@ export async function POST(request: Request) {
 
       if (insertErr) {
         console.error('Supabase device_repairs insert error:', insertErr);
-        return NextResponse.json({ error: insertErr.message }, { status: 500 });
+        return errorResponse(insertErr, 'api/repairs');
       }
     } else {
       SEED_REPAIRS.unshift({
@@ -541,7 +600,7 @@ export async function POST(request: Request) {
     });
   } catch (err: any) {
     console.error('Repair POST error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return errorResponse(err, 'api/repairs');
   }
 }
 
@@ -553,7 +612,8 @@ export async function PATCH(request: Request) {
   const supabase = getSupabaseAdmin();
 
   try {
-    const body = await request.json();
+    const body = await readJson(request);
+    validateRepairUpdate(body);
     const {
       rmaNumber,
       status,
@@ -592,8 +652,9 @@ export async function PATCH(request: Request) {
       clientEmail,
       clientName,
       deviceModel,
-      isAdmin,
     } = body;
+    // Only a real admin session may reopen a completed Job Order (never trust a flag from the browser)
+    const isAdmin = auth.user.role === 'ADMIN';
 
     if (!rmaNumber) {
       return NextResponse.json({ error: 'rmaNumber is required' }, { status: 400 });
@@ -806,10 +867,7 @@ export async function PATCH(request: Request) {
 
       if (updateErr) {
         console.error('[repairs PATCH] Supabase update failed:', updateErr.message);
-        return NextResponse.json(
-          { error: `Database update failed: ${updateErr.message}` },
-          { status: 500 }
-        );
+        return errorResponse(updateErr, 'api/repairs');
       }
     } else {
       const found = SEED_REPAIRS.find((r: any) => r.rma_number === rmaNumber);
@@ -948,6 +1006,6 @@ export async function PATCH(request: Request) {
     });
   } catch (err: any) {
     console.error('Repair PATCH error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return errorResponse(err, 'api/repairs');
   }
 }

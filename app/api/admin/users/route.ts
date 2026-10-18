@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireAuth } from '@/lib/serverAuth';
+import { errorResponse, readJson, optUuid, optEmail, oneOf } from '@/lib/validation';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -66,7 +67,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ users: combinedUsers });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Failed to fetch users' }, { status: 500 });
+    return errorResponse(err, 'api/admin/users');
   }
 }
 
@@ -77,13 +78,12 @@ export async function POST(request: Request) {
 
   try {
     const supabaseAdmin = getAdminClient();
-    const { userId, email, newRole } = await request.json();
-
-    if (!newRole || (!userId && !email)) {
+    const body = await readJson(request);
+    const userId = optUuid(body.userId, 'User');
+    const email = optEmail(body.email);
+    const newRole = oneOf(body.newRole, 'Role', ['STUDENT', 'TECHNICIAN', 'ADMIN'] as const);
+    if (!userId && !email) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
-    }
-    if (!['STUDENT', 'TECHNICIAN', 'ADMIN'].includes(newRole)) {
-      return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
     }
     if (userId === auth.user.id || (email || '').toLowerCase().trim() === auth.user.email) {
       return NextResponse.json({ error: 'You cannot change your own role.' }, { status: 400 });
@@ -136,6 +136,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, role: newRole });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Failed to update role' }, { status: 500 });
+    return errorResponse(err, 'api/admin/users');
   }
 }

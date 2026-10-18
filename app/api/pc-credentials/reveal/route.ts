@@ -4,6 +4,7 @@ import { requireAuth, getServiceClient, getClientIp, STAFF_ROLES } from '@/lib/s
 import { decryptCredential, isCredentialsKeyConfigured } from '@/lib/credentialCrypto';
 import { checkLockout, recordFailedAttempt } from '@/lib/lockoutStore';
 import { notifyAdmins } from '@/lib/notifications';
+import { readJson, optUuid, reqStr, PATTERNS, ValidationError, errorResponse } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -41,7 +42,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'CREDENTIALS_KEY is not configured on the server.' }, { status: 500 });
   }
 
-  const body = await request.json().catch(() => ({}));
+  let body: Record<string, any>;
+  try {
+    body = await readJson(request, 10_000);
+    optUuid(body.workstationId, 'PC');
+    if (body.labCode !== undefined) reqStr(String(body.labCode).toUpperCase(), 'Room', { max: 20, pattern: PATTERNS.labCode });
+    if (body.pcNum !== undefined) reqStr(body.pcNum, 'PC number', { max: 10, pattern: PATTERNS.pcNum });
+    if (typeof body.password === 'string' && body.password.length > 128) throw new ValidationError('Password is too long.');
+  } catch (err) {
+    return errorResponse(err, 'api/pc-credentials/reveal');
+  }
   const scope: 'PC' | 'ROOM' | 'ALL' = ['PC', 'ROOM', 'ALL'].includes(body.scope) ? body.scope : 'PC';
   const reason = String(body.reason || '').trim();
   const password = String(body.password || '');

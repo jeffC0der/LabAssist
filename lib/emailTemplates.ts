@@ -1,12 +1,38 @@
 /**
  * Generates an HTML email for account lockout notification via Brevo.
  */
+// ── HTML escaping for user-supplied text in emails ──
+// Names, device details, issues, notes etc. come from users; escaping stops them from injecting
+// links or markup into emails sent from the LabAssist address.
+export function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Escape every string in a template data object (including arrays of objects, e.g. invoice items). */
+export function escapeTemplateData<T>(data: T): T {
+  if (typeof data === 'string') return escapeHtml(data) as unknown as T;
+  if (Array.isArray(data)) return data.map((item) => escapeTemplateData(item)) as unknown as T;
+  if (data && typeof data === 'object' && !(data instanceof Date)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data as Record<string, unknown>)) out[k] = escapeTemplateData(v);
+    return out as T;
+  }
+  return data;
+}
+
 export function generateAccountLockedEmailHtml(
   recipientEmail: string,
   lockedUntilDate: Date,
   lockDurationMinutes = 15,
   recipientName?: string
 ): string {
+  recipientEmail = escapeHtml(recipientEmail);
+  recipientName = recipientName ? escapeHtml(recipientName) : recipientName;
   const greeting = recipientName ? `Hello ${recipientName},` : 'Hello,';
   const formattedUnlockTime = lockedUntilDate.toLocaleTimeString('en-US', {
     hour: 'numeric',
@@ -249,6 +275,7 @@ export function generateRepairReceiptEmailHtml(receipt: {
   physicalConditionNotes: string;
   additionalInspectionRemarks: string;
 }): string {
+  receipt = escapeTemplateData(receipt);
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -539,6 +566,7 @@ export interface InvoiceTemplateData {
  * Generates an HTML email for newly generated Repair Invoices via Brevo.
  */
 export function generateInvoiceEmailHtml(data: InvoiceTemplateData): string {
+  data = escapeTemplateData(data);
   const isPaid =
     data.paymentStatus === 'PAID' ||
     data.paymentStatus?.toLowerCase() === 'paid' ||
@@ -872,6 +900,7 @@ export interface ReadyForPickupTemplateData {
  * Generates an HTML email for Ready for Pickup notifications via Brevo.
  */
 export function generateReadyForPickupEmailHtml(data: ReadyForPickupTemplateData): string {
+  data = escapeTemplateData(data);
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -1092,6 +1121,7 @@ export interface FinalReceiptTemplateData {
  * Generates an HTML email for Final Job Order & Release Receipt notifications via Brevo.
  */
 export function generateFinalReceiptEmailHtml(data: FinalReceiptTemplateData): string {
+  data = escapeTemplateData(data);
   const formattedTotal = Number(data.totalPaid || 0).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,

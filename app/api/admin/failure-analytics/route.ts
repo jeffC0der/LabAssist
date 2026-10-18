@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireAuth } from '@/lib/serverAuth';
+import { errorResponse } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -100,9 +101,6 @@ export async function GET(request: Request) {
     });
   } catch (err: any) {
     console.error('Failure analytics fetch error:', err);
-    return NextResponse.json(
-      { error: err.message || 'Failed to load failure analytics', incidents: [], labs: [], stations: [] },
-      { status: 500 }
-    );
+    return errorResponse(err, 'api/admin/failure-analytics', { incidents: [], labs: [], stations: [] });
   }
 }

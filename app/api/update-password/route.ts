@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/serverAuth';
 import { verifyResetToken } from '@/lib/resetToken';
 import { resetLockout } from '@/lib/lockoutStore';
+import { errorResponse } from '@/lib/validation';
 
 // Sets a new password after a verified password-reset OTP.
 // Requires the resetToken returned by /api/verify-otp (purpose: password_reset).
@@ -16,7 +17,11 @@ export async function POST(request: Request) {
 
     const { resetToken, newPassword } = body;
 
-    const cleanEmail = verifyResetToken(resetToken || '');
+    if (typeof resetToken !== 'string' || resetToken.length > 2048 || (newPassword !== undefined && typeof newPassword !== 'string')) {
+      return NextResponse.json({ success: false, error: 'Invalid request.' }, { status: 400 });
+    }
+
+    const cleanEmail = verifyResetToken(resetToken);
     if (!cleanEmail) {
       return NextResponse.json(
         { success: false, error: 'Your password reset session has expired. Please request a new recovery code.' },
@@ -24,9 +29,9 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!newPassword || newPassword.length < 16) {
+    if (!newPassword || newPassword.length < 16 || newPassword.length > 128) {
       return NextResponse.json(
-        { success: false, error: 'New password must be at least 16 characters.' },
+        { success: false, error: 'New password must be 16 to 128 characters.' },
         { status: 400 }
       );
     }
@@ -65,9 +70,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, message: 'Password updated successfully.' });
   } catch (err: any) {
     console.error('[update-password] Error:', err);
-    return NextResponse.json(
-      { success: false, error: err?.message || 'Internal server error.' },
-      { status: 500 }
-    );
+    return errorResponse(err, 'api/update-password');
   }
 }

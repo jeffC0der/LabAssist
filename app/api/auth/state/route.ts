@@ -48,7 +48,19 @@ interface OAuthStatePayload {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const returnUrl = typeof body?.returnUrl === 'string' ? body.returnUrl : '/dashboard';
+    // Only same-site destinations: a relative path, or a URL on this same origin
+    let returnUrl = '/dashboard';
+    if (typeof body?.returnUrl === 'string' && body.returnUrl.length <= 500) {
+      const candidate = body.returnUrl;
+      const sameOrigin = (() => {
+        try {
+          return new URL(candidate).origin === new URL(req.url).origin;
+        } catch {
+          return false;
+        }
+      })();
+      if ((candidate.startsWith('/') && !candidate.startsWith('//')) || sameOrigin) returnUrl = candidate;
+    }
 
     const payload: OAuthStatePayload = {
       csrfNonce: crypto.randomUUID(),

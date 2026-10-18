@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireAuth, markSessionVerified } from '@/lib/serverAuth';
+import { errorResponse, optStr, optBool } from '@/lib/validation';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -30,7 +31,10 @@ export async function POST(request: Request) {
     }
 
     // Users can only update their own profile: the target always comes from the verified session
-    const { name, department, avatar, requireLoginOtp } = body;
+    const name = optStr(body.name, 'Full name', { max: 80 });
+    const department = optStr(body.department, 'Department', { max: 100 });
+    const avatar = optStr(body.avatar, 'Avatar', { max: 500 });
+    const requireLoginOtp = optBool(body.requireLoginOtp, 'Two-factor login');
     const userId = auth.user.id;
     const cleanEmail = auth.user.email;
 
@@ -131,10 +135,7 @@ export async function POST(request: Request) {
     });
   } catch (err: any) {
     console.error('[api/user/profile] Server error:', err);
-    return NextResponse.json(
-      { success: false, error: err?.message || 'Failed to update profile.' },
-      { status: 500 }
-    );
+    return errorResponse(err, 'api/user/profile');
   }
 }
 
@@ -216,9 +217,6 @@ export async function GET(request: Request) {
       },
     });
   } catch (err: any) {
-    return NextResponse.json(
-      { success: false, error: err?.message || 'Failed to retrieve profile.' },
-      { status: 500 }
-    );
+    return errorResponse(err, 'api/user/profile');
   }
 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireAuth, getServiceClient, sessionIdFromToken, requiresLoginOtp, markSessionVerified } from '@/lib/serverAuth';
 import { checkLockout, recordFailedAttempt } from '@/lib/lockoutStore';
+import { errorResponse } from '@/lib/validation';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -25,8 +26,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: 'Invalid JSON request body.' }, { status: 400 });
   }
 
-  const currentPassword = body.currentPassword || '';
-  const newPassword = body.newPassword || '';
+  const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : '';
+  const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+  if (currentPassword.length > 128 || newPassword.length > 128) {
+    return NextResponse.json({ success: false, error: 'Passwords must be 128 characters or fewer.' }, { status: 400 });
+  }
 
   if (!currentPassword) {
     return NextResponse.json({ success: false, error: 'Enter your current password.' }, { status: 400 });
@@ -100,6 +104,6 @@ export async function POST(request: Request) {
     });
   } catch (err: any) {
     console.error('[user/change-password] Error:', err);
-    return NextResponse.json({ success: false, error: err?.message || 'Failed to change password.' }, { status: 500 });
+    return errorResponse(err, 'api/user/change-password');
   }
 }

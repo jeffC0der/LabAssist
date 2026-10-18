@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
+import { errorResponse } from '@/lib/validation';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -78,6 +79,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ technicians });
   } catch (err: any) {
     console.error('Error fetching technicians:', err);
-    return NextResponse.json({ error: err.message || 'Failed to load technicians', technicians: [] }, { status: 500 });
+    return errorResponse(err, 'api/technicians', { technicians: [] });
   }
 }

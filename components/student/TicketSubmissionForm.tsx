@@ -194,10 +194,10 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
       userEmail: user?.email,
     };
 
-    addTicket(newTicket);
-    if (onTicketCreated) onTicketCreated(newTicket);
+    const savedTicket = await addTicket(newTicket);
+    if (onTicketCreated) onTicketCreated(savedTicket);
 
-    toast.success('Ticket Submitted Successfully', `${newTicket.ticket_id} routed to the active IT Technician queue!`);
+    toast.success('Ticket Submitted Successfully', `${savedTicket.ticket_id} routed to the active IT Technician queue!`);
 
     // Reset description & keep lab context
     setDescription('');

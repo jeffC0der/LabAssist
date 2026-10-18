@@ -19,7 +19,7 @@ interface TicketContextValue {
   dispatch: (ticketId: string, assignee: string) => Promise<void>;
   confirmRepair: (ticketId: string) => Promise<void>;
   resolve: (ticketId: string, notes?: string) => Promise<void>;
-  addTicket: (ticket: Ticket) => Promise<void>;
+  addTicket: (ticket: Ticket) => Promise<Ticket>;
   refreshTickets: () => Promise<void>;
 }
 
@@ -249,20 +249,31 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const addTicket = useCallback(async (ticket: Ticket) => {
+  const addTicket = useCallback(async (ticket: Ticket): Promise<Ticket> => {
     // 1. Optimistic local update
     setTickets((prev) => [ticket, ...prev]);
 
-    // 2. Persist to Supabase via backend API (sets workstation to ISSUE_REPORTED)
+    // 2. Persist to Supabase via backend API (sets workstation to ISSUE_REPORTED).
+    //    The server may assign a different ticket ID if the one picked here was taken.
     try {
-      await fetch('/api/tickets', {
+      const res = await fetch('/api/tickets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ticket) {
+        const saved: Ticket = data.ticket;
+        if (saved.ticket_id !== ticket.ticket_id) {
+          setTickets((prev) => prev.map((t) => (t === ticket ? saved : t)));
+        }
+        return saved;
+      }
+      console.error('Failed to add ticket on server:', data.error);
     } catch (err) {
       console.error('Failed to add ticket on server:', err);
     }
+    return ticket;
   }, []);
 
   const filteredTickets = tickets.filter((t) => {

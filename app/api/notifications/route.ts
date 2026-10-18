@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAuth, getServiceClient } from '@/lib/serverAuth';
+import { errorResponse, readJson, isUuid } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -40,7 +41,7 @@ export async function GET(request: Request) {
   ]);
 
   if (listRes.error) {
-    return NextResponse.json({ error: listRes.error.message, notifications: [], unreadCount: 0 }, { status: 500 });
+    return errorResponse(listRes.error, 'api/notifications', { notifications: [], unreadCount: 0 });
   }
 
   const notifications: AppNotification[] = (listRes.data || []).map((n: any) => ({
@@ -65,16 +66,21 @@ export async function PATCH(request: Request) {
   const supabase = getServiceClient();
   if (!supabase) return NextResponse.json({ error: 'Database is not configured' }, { status: 503 });
 
-  const body = await request.json().catch(() => ({}));
+  let body: Record<string, any>;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    return errorResponse(err, 'api/notifications');
+  }
   let query = supabase.from('notifications').update({ is_read: true }).eq('user_id', auth.user.id).eq('is_read', false);
 
   if (!body.all) {
-    const ids: string[] = Array.isArray(body.ids) ? body.ids.filter((x: unknown) => typeof x === 'string') : [];
+    const ids: string[] = Array.isArray(body.ids) ? body.ids.filter((x: unknown) => isUuid(x)).slice(0, 200) : [];
     if (ids.length === 0) return NextResponse.json({ error: 'ids or all is required' }, { status: 400 });
     query = query.in('id', ids);
   }
 
   const { error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return errorResponse(error, 'api/notifications');
   return NextResponse.json({ success: true });
 }

@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { verifyAndConsumeOtp } from '@/lib/otpStore';
 import { getServiceClient, getSessionUser, markSessionVerified } from '@/lib/serverAuth';
 import { issueResetToken } from '@/lib/resetToken';
+import { reqEmail, reqStr, optStr, optOneOf, PATTERNS, ValidationError, errorResponse } from '@/lib/validation';
 
 interface VerifyOtpRequestBody {
   email?: string;
@@ -62,24 +63,21 @@ export async function POST(request: Request) {
       );
     }
 
-    const { email, otpCode, purpose = 'verification', name, password } = body;
-
-    if (!email || typeof email !== 'string' || !email.trim()) {
-      return NextResponse.json(
-        { success: false, error: 'Email address is required.' },
-        { status: 400 }
-      );
+    let cleanEmail: string, cleanOtp: string, purpose: VerifyOtpRequestBody['purpose'] & string, name: string | undefined, password: string | undefined;
+    try {
+      cleanEmail = reqEmail(body.email);
+      cleanOtp = reqStr(body.otpCode, 'Verification code', { max: 6, pattern: PATTERNS.sixDigits, patternMessage: 'Enter the 6-digit code.' });
+      purpose = optOneOf(body.purpose, 'purpose', ['signup', 'password_reset', 'oauth_signup', 'login', 'verification'] as const) || 'verification';
+      name = optStr(body.name, 'Name', { max: 80 });
+      if (body.password !== undefined && body.password !== null) {
+        if (typeof body.password !== 'string' || body.password.length < 6 || body.password.length > 128) {
+          throw new ValidationError('Password must be between 6 and 128 characters.');
+        }
+        password = body.password;
+      }
+    } catch (err) {
+      return errorResponse(err, 'verify-otp');
     }
-
-    if (!otpCode || typeof otpCode !== 'string' || !otpCode.trim()) {
-      return NextResponse.json(
-        { success: false, error: '6-digit OTP code is required.' },
-        { status: 400 }
-      );
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanOtp = otpCode.trim();
 
     // 1. Verify and consume OTP — the code must have been issued for this same purpose
     const verification = await verifyAndConsumeOtp(cleanEmail, cleanOtp, purpose);
@@ -159,10 +157,7 @@ export async function POST(request: Request) {
         });
       } catch (err: any) {
         console.error('[verify-otp] Signup processing error:', err);
-        return NextResponse.json(
-          { success: false, error: err?.message || 'Failed to complete registration.' },
-          { status: 500 }
-        );
+        return errorResponse(err, 'api/verify-otp');
       }
     }
 
@@ -207,9 +202,6 @@ export async function POST(request: Request) {
     });
   } catch (err: any) {
     console.error('[verify-otp] Server error:', err);
-    return NextResponse.json(
-      { success: false, error: err?.message || 'Internal server error during OTP verification.' },
-      { status: 500 }
-    );
+    return errorResponse(err, 'api/verify-otp');
   }
 }

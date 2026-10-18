@@ -1,11 +1,13 @@
 import { BrevoClient } from '@getbrevo/brevo';
 import { generateNumericOtp, saveOtp } from '@/lib/otpStore';
 import { decrypt } from '@/lib/aes';
+import { escapeHtml } from '@/lib/emailTemplates';
 
 /**
  * Generates a clean, professional, responsive HTML email template for the OTP code.
  */
 function generateOtpEmailHtml(otpCode: string, recipientName?: string, purpose = 'verification'): string {
+  recipientName = recipientName ? escapeHtml(recipientName) : recipientName;
   const isReset = purpose === 'password_reset';
   const actionTitle = isReset ? 'Password Reset Code' : 'Your Verification Code';
   const actionDesc = isReset

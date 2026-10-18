@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireAuth } from '@/lib/serverAuth';
+import { errorResponse, readJson, reqStr, reqNum, optStr, optEmail, optOneOf, optDate, PATTERNS } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -302,7 +303,18 @@ export async function POST(request: Request) {
   const supabase = getSupabaseAdmin();
 
   try {
-    const body = await request.json();
+    const body = await readJson(request);
+    reqStr(body.clientName, 'Client name', { max: 80 });
+    optEmail(body.clientEmail, 'Client email');
+    reqNum(body.amount, 'Amount', { min: 0.01, max: 10_000_000 });
+    optOneOf(body.paymentMethod, 'Payment method', ['CASH', 'ONLINE', 'GCASH', 'MAYA', 'BANK_TRANSFER'] as const);
+    optOneOf(body.paymentStatus, 'Payment status', ['PAID', 'UNPAID', 'PENDING', 'REFUNDED'] as const);
+    optStr(body.invoiceNumber, 'Invoice number', { max: 40 });
+    optStr(body.jobOrderNumber, 'Job order', { max: 40, pattern: PATTERNS.jobOrder });
+    optStr(body.technicianName, 'Technician', { max: 80 });
+    optStr(body.referenceNumber, 'Reference number', { max: 100 });
+    optStr(body.notes, 'Notes', { max: 500 });
+    optDate(body.paymentDate, 'Payment date');
     const {
       invoiceNumber,
       jobOrderNumber,
@@ -365,7 +377,7 @@ export async function POST(request: Request) {
 
       if (insertErr) {
         console.error('Payment insert into public.payments failed:', insertErr.message);
-        return NextResponse.json({ error: `Payment could not be saved: ${insertErr.message}` }, { status: 500 });
+        return errorResponse(insertErr, 'api/admin/revenue');
       }
       if (inserted?.id) newPayment.id = inserted.id;
     }
@@ -373,6 +385,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, payment: newPayment });
   } catch (err: any) {
     console.error('Payment POST error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return errorResponse(err, 'api/admin/revenue');
   }
 }

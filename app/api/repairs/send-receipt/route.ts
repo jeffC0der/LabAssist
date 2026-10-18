@@ -1,13 +1,20 @@
 import { NextResponse } from 'next/server';
 import { sendRepairReceiptEmail } from '@/lib/emailService';
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
+import { errorResponse, readJson, reqStr, reqEmail, optStr, PATTERNS } from '@/lib/validation';
 
 export async function POST(request: Request) {
   const auth = await requireAuth(request, STAFF_ROLES);
   if (auth.response) return auth.response;
 
   try {
-    const body = await request.json();
+    const body = await readJson(request);
+    reqStr(body.clientName, 'Client name', { max: 80 });
+    reqEmail(body.clientEmail, 'Client email');
+    reqStr(body.jobOrderNo, 'Job order', { max: 40, pattern: PATTERNS.jobOrder });
+    for (const [field, max] of [['confirmationDate', 60], ['deviceType', 30], ['deviceModel', 80], ['serialNumber', 50], ['osSpecs', 200], ['reportedIssue', 1000], ['additionalInspectionRemarks', 500]] as const) {
+      optStr(body[field], field, { max });
+    }
     const {
       clientName,
       clientEmail,
@@ -64,9 +71,6 @@ export async function POST(request: Request) {
     });
   } catch (err: any) {
     console.error('Error in send-receipt API:', err);
-    return NextResponse.json(
-      { success: false, error: err.message || 'Internal server error' },
-      { status: 500 }
-    );
+    return errorResponse(err, 'api/repairs/send-receipt');
   }
 }

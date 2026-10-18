@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAuth, getServiceClient, STAFF_ROLES } from '@/lib/serverAuth';
+import { errorResponse, readJson, reqUuid, reqStr, PATTERNS } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -70,7 +71,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ pcs });
   } catch (err: any) {
     console.error('[workstations/inventory] GET error:', err);
-    return NextResponse.json({ error: err.message || 'Failed to load PCs', pcs: [] }, { status: 500 });
+    return errorResponse(err, 'api/workstations/inventory', { pcs: [] });
   }
 }
 
@@ -85,9 +86,8 @@ export async function POST(request: Request) {
 
   try {
     const supabase = db();
-    const body = await request.json().catch(() => ({}));
-    const labCode = String(body.labCode || '').trim().toUpperCase();
-    if (!labCode) return NextResponse.json({ error: 'labCode is required.' }, { status: 400 });
+    const body = await readJson(request);
+    const labCode = reqStr(String(body.labCode || '').toUpperCase(), 'Room', { max: 20, pattern: PATTERNS.labCode });
 
     const { data: roomPcs, error: roomErr } = await supabase.from('workstations').select('id, pc_num').eq('lab_code', labCode);
     if (roomErr) throw new Error(roomErr.message);
@@ -179,7 +179,7 @@ export async function POST(request: Request) {
     });
   } catch (err: any) {
     console.error('[workstations/inventory] POST error:', err);
-    return NextResponse.json({ error: err.message || 'Bulk update failed' }, { status: 500 });
+    return errorResponse(err, 'api/workstations/inventory');
   }
 }
 
@@ -190,9 +190,8 @@ export async function PATCH(request: Request) {
 
   try {
     const supabase = db();
-    const body = await request.json().catch(() => ({}));
-    const { id } = body;
-    if (!id) return NextResponse.json({ error: 'id is required.' }, { status: 400 });
+    const body = await readJson(request);
+    const id = reqUuid(body.id, 'PC');
 
     const { data: pc } = await supabase.from('workstations').select('*').eq('id', id).maybeSingle();
     if (!pc) return NextResponse.json({ error: 'PC not found.' }, { status: 404 });
@@ -275,6 +274,6 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ success: true, movedTo });
   } catch (err: any) {
     console.error('[workstations/inventory] PATCH error:', err);
-    return NextResponse.json({ error: err.message || 'Failed to update PC' }, { status: 500 });
+    return errorResponse(err, 'api/workstations/inventory');
   }
 }

@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { sendInvoiceNotificationEmail } from '@/lib/emailService';
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 import { notifyUser, formatPeso } from '@/lib/notifications';
+import { errorResponse, readJson, optStr, optOneOf, optNum, optEmail, ValidationError, PATTERNS } from '@/lib/validation';
 import {
   getInMemoryInvoice,
   setInMemoryInvoice,
@@ -341,7 +342,7 @@ export async function GET(request: Request) {
     });
   } catch (err: any) {
     console.error('Error fetching invoice:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return errorResponse(err, 'api/repairs/invoices');
   }
 }
 
@@ -351,7 +352,31 @@ export async function POST(request: Request) {
   if (auth.response) return auth.response;
 
   try {
-    const body = await request.json();
+    const body = await readJson(request);
+    // Validate before anything is calculated or stored
+    optStr(body.jobOrderId, 'Job order', { max: 40, pattern: PATTERNS.jobOrder });
+    optStr(body.jobOrderNumber, 'Job order', { max: 40, pattern: PATTERNS.jobOrder });
+    optOneOf(body.paymentTiming, 'Payment timing', ['PAY_NOW', 'PAY_AFTER_REPAIR'] as const);
+    optOneOf(body.paymentStatus, 'Payment status', ['UNPAID', 'PARTIALLY_PAID', 'PAID'] as const);
+    optOneOf(body.paymentMethod, 'Payment method', ['CASH', 'ONLINE', 'GCASH', 'MAYA', 'BANK_TRANSFER'] as const);
+    optNum(body.amountPaid, 'Amount paid', { min: 0, max: 10_000_000 });
+    optStr(body.onlinePaymentReference, 'Payment reference', { max: 100 });
+    optStr(body.billingNotes, 'Billing notes', { max: 1000 });
+    optStr(body.clientName, 'Client name', { max: 80 });
+    optEmail(body.clientEmail, 'Client email');
+    optStr(body.deviceModel, 'Device model', { max: 80 });
+    optStr(body.serialNumber, 'Serial number', { max: 50 });
+    optStr(body.assignedTechnician, 'Technician', { max: 80 });
+    if (body.items !== undefined) {
+      if (!Array.isArray(body.items) || body.items.length > 50) throw new ValidationError('Invoice items must be a list of up to 50 items.');
+      body.items.forEach((it: any, i: number) => {
+        if (!it || typeof it !== 'object') throw new ValidationError(`Invoice item ${i + 1} is invalid.`);
+        optStr(it.workScope, `Item ${i + 1} scope`, { max: 60 });
+        optStr(it.itemName, `Item ${i + 1} name`, { max: 120 });
+        optNum(it.quantity, `Item ${i + 1} quantity`, { min: 0, max: 999, integer: true });
+        optNum(it.unitCost, `Item ${i + 1} unit cost`, { min: 0, max: 1_000_000 });
+      });
+    }
     const {
       jobOrderId,
       jobOrderNumber,
@@ -613,10 +638,7 @@ export async function POST(request: Request) {
 
       if (invSaveErr) {
         console.error('[Invoices POST] repair_invoices save failed:', invSaveErr.message);
-        return NextResponse.json(
-          { error: `Invoice could not be saved: ${invSaveErr.message}` },
-          { status: 500 }
-        );
+        return errorResponse(invSaveErr, 'api/repairs/invoices');
       }
       if (savedInv?.id) formattedInvoice.id = savedInv.id;
 
@@ -831,6 +853,6 @@ export async function POST(request: Request) {
     });
   } catch (err: any) {
     console.error('Invoice creation error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return errorResponse(err, 'api/repairs/invoices');
   }
 }

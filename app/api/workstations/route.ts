@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { MOCK_WORKSTATIONS, type Workstation, type WorkstationStatus } from '@/lib/mockData';
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
+import { errorResponse, readJson, reqStr, optStr, optOneOf, PATTERNS } from '@/lib/validation';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -88,8 +89,12 @@ export async function PATCH(request: Request) {
   const supabase = getSupabaseAdmin();
 
   try {
-    const body = await request.json();
-    const { labCode, pcNum, status, activeIssue, assignedUser } = body;
+    const body = await readJson(request);
+    const labCode = reqStr(String(body.labCode || '').toUpperCase(), 'Room', { max: 20, pattern: PATTERNS.labCode });
+    const pcNum = reqStr(body.pcNum, 'PC number', { max: 10, pattern: PATTERNS.pcNum });
+    const status = optOneOf(body.status, 'Status', ['ONLINE', 'OCCUPIED', 'ISSUE_REPORTED', 'UNDER_REPAIR'] as const);
+    const activeIssue = body.activeIssue === null ? null : optStr(body.activeIssue, 'Active issue', { max: 300 });
+    const assignedUser = body.assignedUser === null ? null : optStr(body.assignedUser, 'Assigned user', { max: 100 });
 
     if (!labCode || !pcNum) {
       return NextResponse.json({ error: 'labCode and pcNum are required' }, { status: 400 });
@@ -114,6 +119,6 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ success: true, labCode, pcNum, status });
   } catch (err: any) {
     console.error('Workstation PATCH error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return errorResponse(err, 'api/workstations');
   }
 }

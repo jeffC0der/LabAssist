@@ -9,6 +9,7 @@ import { LoanerProvider } from '@/context/LoanerContext';
 import { NotificationProvider } from '@/context/NotificationContext';
 import { RoleProvider } from '@/context/RoleContext';
 import { ToastContainer } from '@/components/shared/Toast';
+import SessionGuard from '@/components/auth/SessionGuard';
 
 export const metadata: Metadata = {
   title: 'LabAssist — Campus Lab Maintenance Platform',
@@ -50,6 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                       <NotificationProvider>
                         {children}
                         <ToastContainer />
+                        <SessionGuard />
                       </NotificationProvider>
                     </LoanerProvider>
                   </RepairProvider>

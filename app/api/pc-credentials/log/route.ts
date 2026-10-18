@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAuth, getServiceClient } from '@/lib/serverAuth';
+import { errorResponse } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -34,7 +35,7 @@ export async function GET(request: Request) {
     .select('*')
     .order('created_at', { ascending: false })
     .limit(limit);
-  if (error) return NextResponse.json({ error: error.message, entries: [] }, { status: 500 });
+  if (error) return errorResponse(error, 'api/pc-credentials/log', { entries: [] });
 
   const entries: CredentialLogEntry[] = (data || []).map((r: any) => ({
     id: r.id,

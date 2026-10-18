@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const { idToken, userId } = body;
 
-    if (typeof idToken !== 'string' || !idToken.trim()) {
+    if (typeof idToken !== 'string' || !idToken.trim() || idToken.length > 8192) {
       return NextResponse.json(
         { success: false, error: 'idToken is required.' },
         { status: 400 }

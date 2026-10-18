@@ -5,6 +5,7 @@ import { dispatchBrevoLockoutEmail } from '@/lib/lockoutEmail';
 import { getServiceClient, requiresLoginOtp, sessionIdFromToken, markSessionVerified } from '@/lib/serverAuth';
 import { verifyAndConsumeOtp } from '@/lib/otpStore';
 import { issueAndSendOtp } from '@/lib/otpEmail';
+import { readJson, reqEmail, optStr, PATTERNS, ValidationError, errorResponse } from '@/lib/validation';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -18,18 +19,17 @@ const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PU
  * session ({ access_token, refresh_token }) that the browser installs with supabase.auth.setSession().
  */
 export async function POST(request: Request) {
-  let body: { email?: string; password?: string; otpCode?: string };
+  let email: string, password: string, otpCode: string;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ success: false, error: 'Invalid JSON request body.' }, { status: 400 });
-  }
-
-  const email = (body.email || '').trim().toLowerCase();
-  const password = body.password || '';
-  const otpCode = typeof body.otpCode === 'string' ? body.otpCode.trim() : '';
-  if (!email || !password) {
-    return NextResponse.json({ success: false, error: 'Email and password are required.' }, { status: 400 });
+    const body = await readJson(request, 10_000);
+    email = reqEmail(body.email);
+    if (typeof body.password !== 'string' || !body.password || body.password.length > 128) {
+      throw new ValidationError('Email and password are required.');
+    }
+    password = body.password;
+    otpCode = optStr(body.otpCode, 'Verification code', { max: 6, pattern: PATTERNS.sixDigits, patternMessage: 'Enter the 6-digit code.' }) || '';
+  } catch (err) {
+    return errorResponse(err, 'auth/signin');
   }
   if (!anonKey) {
     return NextResponse.json({ success: false, error: 'Server configuration error: missing Supabase anon key.' }, { status: 500 });
@@ -145,6 +145,6 @@ export async function POST(request: Request) {
     });
   } catch (err: any) {
     console.error('[auth/signin] Error:', err);
-    return NextResponse.json({ success: false, error: err?.message || 'Sign in failed.' }, { status: 500 });
+    return errorResponse(err, 'api/auth/signin');
   }
 }

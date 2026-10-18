@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAuth, getServiceClient } from '@/lib/serverAuth';
+import { errorResponse, readJson, reqStr, PATTERNS } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -91,7 +92,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ rooms });
   } catch (err: any) {
     console.error('[admin/labs] GET error:', err);
-    return NextResponse.json({ error: err.message || 'Failed to load lab rooms', rooms: [] }, { status: 500 });
+    return errorResponse(err, 'api/admin/labs', { rooms: [] });
   }
 }
 
@@ -102,15 +103,15 @@ export async function POST(request: Request) {
 
   try {
     const supabase = db();
-    const body = await request.json();
+    const body = await readJson(request);
 
     if (body.action === 'create_room') {
-      const code = String(body.code || '').trim().toUpperCase();
-      const name = String(body.name || '').trim();
-      const building = String(body.building || '').trim();
-      const floor = String(body.floor || '').trim();
+      const code = reqStr(String(body.code || '').toUpperCase(), 'Room code', { max: 20, pattern: PATTERNS.labCode, patternMessage: 'Room code may only use letters, numbers and dashes (e.g. LAB-106).' });
+      const name = reqStr(body.name, 'Lab name', { max: 100 });
+      const building = reqStr(body.building, 'Building', { max: 100 });
+      const floor = reqStr(body.floor, 'Floor', { max: 40 });
       const pcCount = Math.floor(Number(body.pcCount));
-      const mac = String(body.mac || '').trim().toUpperCase();
+      const mac = String(body.mac || '').trim().toUpperCase().slice(0, 17);
 
       if (!code || !name || !building || !floor) {
         return NextResponse.json({ error: 'Room code, name, building and floor are required.' }, { status: 400 });
@@ -150,7 +151,7 @@ export async function POST(request: Request) {
       const { error: wsErr } = await supabase.from('workstations').insert(stations);
       if (wsErr) {
         await supabase.from('labs').delete().eq('code', code);
-        return NextResponse.json({ error: `Could not create the room's PCs: ${wsErr.message}` }, { status: 500 });
+        return errorResponse(wsErr, 'api/admin/labs');
       }
 
       if (mac) {
@@ -161,7 +162,7 @@ export async function POST(request: Request) {
     }
 
     if (body.action === 'add_mac') {
-      const code = String(body.code || '').trim().toUpperCase();
+      const code = reqStr(String(body.code || '').toUpperCase(), 'Room code', { max: 20, pattern: PATTERNS.labCode });
       const mac = String(body.mac || '').trim().toUpperCase();
       if (!MAC_RE.test(mac)) {
         return NextResponse.json({ error: 'MAC address must look like 24:6F:28:B1:3C:99.' }, { status: 400 });
@@ -177,7 +178,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unknown action.' }, { status: 400 });
   } catch (err: any) {
     console.error('[admin/labs] POST error:', err);
-    return NextResponse.json({ error: err.message || 'Request failed' }, { status: 500 });
+    return errorResponse(err, 'api/admin/labs');
   }
 }
 
@@ -187,7 +188,9 @@ export async function PATCH(request: Request) {
   if (auth.response) return auth.response;
 
   try {
-    const { code, status } = await request.json();
+    const body = await readJson(request);
+    const code = reqStr(String(body.code || '').toUpperCase(), 'Room code', { max: 20, pattern: PATTERNS.labCode });
+    const status = body.status;
     if (!['OPERATIONAL', 'MAINTENANCE'].includes(status)) {
       return NextResponse.json({ error: 'Invalid status.' }, { status: 400 });
     }
@@ -201,7 +204,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ success: true });
   } catch (err: any) {
     console.error('[admin/labs] PATCH error:', err);
-    return NextResponse.json({ error: err.message || 'Request failed' }, { status: 500 });
+    return errorResponse(err, 'api/admin/labs');
   }
 }
 
@@ -218,6 +221,6 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ success: true });
   } catch (err: any) {
     console.error('[admin/labs] DELETE error:', err);
-    return NextResponse.json({ error: err.message || 'Request failed' }, { status: 500 });
+    return errorResponse(err, 'api/admin/labs');
   }
 }

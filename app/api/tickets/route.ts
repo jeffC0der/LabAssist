@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { MOCK_TICKETS, type Ticket, type TicketStatus } from '@/lib/mockData';
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 import { notifyUser } from '@/lib/notifications';
+import { errorResponse, readJson, reqStr, optStr, oneOf, optOneOf, optDate, PATTERNS } from '@/lib/validation';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -136,22 +137,44 @@ export async function POST(request: Request) {
   const supabase = getSupabaseAdmin();
 
   try {
-    const body = await request.json();
-    const ticket: Ticket = body.ticket;
-
-    if (!ticket || !ticket.ticket_id || !ticket.lab_id || !ticket.pc_num) {
+    const body = await readJson(request);
+    const raw = body.ticket;
+    if (!raw || typeof raw !== 'object') {
       return NextResponse.json({ error: 'Missing required ticket fields' }, { status: 400 });
     }
+    const ticket: Ticket = {
+      ...raw,
+      ticket_id: reqStr(raw.ticket_id, 'Ticket ID', { max: 30, pattern: PATTERNS.ticketId }),
+      lab_id: reqStr(String(raw.lab_id || '').toUpperCase(), 'Room', { max: 20, pattern: PATTERNS.labCode }),
+      pc_num: reqStr(raw.pc_num, 'PC number', { max: 10, pattern: PATTERNS.pcNum }),
+      category: oneOf(raw.category, 'Category', ['DISPLAY', 'PERIPHERALS', 'POWER/UPS', 'NET/SOFTWARE'] as const),
+      key: oneOf(raw.key, 'Key', ['A', 'B', 'C', 'D'] as const),
+      priority: optOneOf(raw.priority, 'Priority', ['LOW', 'MEDIUM', 'HIGH'] as const) || 'MEDIUM',
+      status: 'PENDING', // new reports always start pending
+      reporter: reqStr(raw.reporter, 'Reporter', { max: 80 }),
+      description: reqStr(raw.description, 'Description', { max: 1000 }),
+      timestamp: optDate(raw.timestamp, 'Timestamp') || new Date().toISOString(),
+      assignee: undefined,
+      resolvedAt: undefined,
+      notes: undefined,
+      // The reporter is always the signed-in account (no filing tickets on someone else's behalf)
+      userId: auth.user.id,
+      userEmail: auth.user.email,
+    };
 
     if (supabase) {
-      // 1. Insert into tickets table
-      const row = ticketToRow(ticket);
-      const { error: insertErr } = await supabase
-        .from('tickets')
-        .upsert(row, { onConflict: 'ticket_id' });
-
+      // 1. Insert into tickets table. Plain insert (never upsert) so a report can't overwrite an
+      //    existing ticket; if the ID is already taken, pick a fresh one and retry.
+      let insertErr: any = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        ({ error: insertErr } = await supabase.from('tickets').insert(ticketToRow(ticket)));
+        if (insertErr?.code !== '23505') break;
+        const digits = attempt < 3 ? 4 : 6;
+        ticket.ticket_id = `TKT-${Math.floor(10 ** (digits - 1) + Math.random() * 9 * 10 ** (digits - 1))}`;
+      }
       if (insertErr) {
         console.error('Supabase ticket insert error:', insertErr);
+        return NextResponse.json({ error: 'Could not save the ticket. Please try again.' }, { status: 500 });
       }
 
       // 2. Mark workstation as ISSUE_REPORTED (will become UNDER_REPAIR once dispatched)
@@ -167,7 +190,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, ticket });
   } catch (err: any) {
     console.error('Ticket POST handler error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return errorResponse(err, 'api/tickets');
   }
 }
 
@@ -179,12 +202,14 @@ export async function PATCH(request: Request) {
   const supabase = getSupabaseAdmin();
 
   try {
-    const body = await request.json();
-    const { ticketId, status, assignee, notes, resolvedAt, labId, pcNum } = body;
-
-    if (!ticketId || !status) {
-      return NextResponse.json({ error: 'ticketId and status are required' }, { status: 400 });
-    }
+    const body = await readJson(request);
+    const ticketId = reqStr(body.ticketId, 'Ticket ID', { max: 30, pattern: PATTERNS.ticketId });
+    const status = oneOf(body.status, 'Status', ['PENDING', 'DISPATCHED', 'UNDER_REPAIR', 'RESOLVED'] as const);
+    const assignee = optStr(body.assignee, 'Assignee', { max: 80 });
+    const notes = optStr(body.notes, 'Notes', { max: 1000 });
+    const resolvedAt = optDate(body.resolvedAt, 'Resolved at');
+    const labId = body.labId === undefined ? undefined : reqStr(String(body.labId).toUpperCase(), 'Room', { max: 20, pattern: PATTERNS.labCode });
+    const pcNum = body.pcNum === undefined ? undefined : reqStr(body.pcNum, 'PC number', { max: 10, pattern: PATTERNS.pcNum });
 
     if (supabase) {
       const updates: any = { status };
@@ -333,6 +358,6 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ success: true, ticketId, status, assignee });
   } catch (err: any) {
     console.error('Ticket PATCH handler error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return errorResponse(err, 'api/tickets');
   }
 }

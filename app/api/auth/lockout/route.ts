@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { checkLockout, resetLockout, MAX_FAILED_ATTEMPTS } from '@/lib/lockoutStore';
 import { getAuthUser } from '@/lib/serverAuth';
+import { readJson, reqEmail, optOneOf, errorResponse } from '@/lib/validation';
 
 interface LockoutRequestBody {
   email?: string;
@@ -18,20 +19,9 @@ interface LockoutRequestBody {
  */
 export async function POST(request: Request) {
   try {
-    let body: LockoutRequestBody;
-    try {
-      body = await request.json();
-    } catch {
-      return NextResponse.json({ success: false, error: 'Invalid JSON request body.' }, { status: 400 });
-    }
-
-    const { email, action = 'check' } = body;
-
-    if (!email || typeof email !== 'string' || !email.trim()) {
-      return NextResponse.json({ success: false, error: 'Email is required.' }, { status: 400 });
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
+    const body = (await readJson(request)) as LockoutRequestBody;
+    const cleanEmail = reqEmail(body.email);
+    const action = optOneOf(body.action, 'action', ['check', 'unlock'] as const) || 'check';
 
     if (action === 'check') {
       const status = await checkLockout(cleanEmail);
@@ -57,11 +47,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ success: false, error: 'Unknown action specified.' }, { status: 400 });
-  } catch (err: any) {
-    console.error('[lockout-route] Server error:', err);
-    return NextResponse.json(
-      { success: false, error: err?.message || 'Internal server error in lockout handler.' },
-      { status: 500 }
-    );
+  } catch (err) {
+    return errorResponse(err, 'lockout-route');
   }
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireAuth, getAuthUser, STAFF_ROLES } from '@/lib/serverAuth';
+import { errorResponse, readJson, reqStr, optStr, oneOf } from '@/lib/validation';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -115,7 +116,13 @@ export async function POST(request: Request) {
   const supabase = getSupabaseAdmin();
 
   try {
-    const body = await request.json();
+    const body = await readJson(request);
+    reqStr(body.itemId, 'Item', { max: 20 });
+    optStr(body.itemName, 'Item name', { max: 80 });
+    reqStr(body.studentName, 'Student name', { max: 80 });
+    reqStr(body.studentId, 'Student ID', { max: 30 });
+    reqStr(body.labRoom, 'Lab room', { max: 20 });
+    reqStr(body.duration, 'Duration', { max: 40 });
     const { itemId, itemName, studentName, studentId, labRoom, duration } = body;
 
     if (!itemId || !studentName || !studentId || !labRoom || !duration) {
@@ -151,7 +158,7 @@ export async function POST(request: Request) {
 
       if (insertErr) {
         console.error('Supabase loaner_requests insert error:', insertErr);
-        return NextResponse.json({ error: insertErr.message }, { status: 500 });
+        return errorResponse(insertErr, 'api/loaners');
       }
 
       // Decrement available count on the item
@@ -176,7 +183,7 @@ export async function POST(request: Request) {
     });
   } catch (err: any) {
     console.error('Loaner POST error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return errorResponse(err, 'api/loaners');
   }
 }
 
@@ -188,7 +195,10 @@ export async function PATCH(request: Request) {
   const supabase = getSupabaseAdmin();
 
   try {
-    const body = await request.json();
+    const body = await readJson(request);
+    reqStr(body.requestId, 'Request', { max: 40 });
+    oneOf(body.status, 'Status', ['APPROVED', 'CHECKED_OUT', 'RETURNED', 'REJECTED', 'CANCELLED'] as const);
+    optStr(body.itemId, 'Item', { max: 20 });
     const { requestId, status, itemId } = body;
 
     if (!requestId || !status) {
@@ -206,7 +216,7 @@ export async function PATCH(request: Request) {
 
       if (updateErr) {
         console.error('Supabase loaner_requests update error:', updateErr);
-        return NextResponse.json({ error: updateErr.message }, { status: 500 });
+        return errorResponse(updateErr, 'api/loaners');
       }
 
       // If returned, increment available count
@@ -229,6 +239,6 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ success: true, requestId, status });
   } catch (err: any) {
     console.error('Loaner PATCH error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return errorResponse(err, 'api/loaners');
   }
 }
