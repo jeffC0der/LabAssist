@@ -1,6 +1,7 @@
 'use client';
 import React, { useState } from 'react';
-import { Monitor, Keyboard, Zap, Wifi, User, CheckCircle, ExternalLink, Inbox, Wrench, Sparkles } from 'lucide-react';
+import { Monitor, Keyboard, Zap, Wifi, User, CheckCircle, ExternalLink, Inbox, Wrench, Sparkles, KeyRound } from 'lucide-react';
+import CredentialRevealDialog, { type RevealTarget } from '@/components/dashboard/CredentialRevealDialog';
 import { useTickets } from '@/context/TicketContext';
 import { useToast } from '@/context/ToastContext';
 import type { Ticket } from '@/lib/mockData';
@@ -21,9 +22,10 @@ interface TicketRowProps {
   onOpenDispatchModal: (t: Ticket) => void;
   onConfirmRepair: (t: Ticket) => void;
   onResolveTicket: (t: Ticket) => void;
+  onShowCredentials: (t: Ticket) => void;
 }
 
-function TicketRow({ ticket, onViewDetails, onOpenDispatchModal, onConfirmRepair, onResolveTicket }: TicketRowProps) {
+function TicketRow({ ticket, onViewDetails, onOpenDispatchModal, onConfirmRepair, onResolveTicket, onShowCredentials }: TicketRowProps) {
   const catColors    = getCategoryColors(ticket.category);
   const statusColors = getStatusColors(ticket.status);
   const prioColors   = getPriorityColors(ticket.priority);
@@ -165,17 +167,40 @@ function TicketRow({ ticket, onViewDetails, onOpenDispatchModal, onConfirmRepair
           >
             <ExternalLink size={14} aria-hidden="true" />
           </button>
+
+          {/* PC admin credentials (same security as the PC Credentials tab) */}
+          <button
+            id={`creds-${ticket.ticket_id}`}
+            onClick={(e) => { e.stopPropagation(); onShowCredentials(ticket); }}
+            className="p-1.5 rounded-lg text-rose-300/70 hover:text-rose-200 hover:bg-rose-500/10 transition-all"
+            aria-label={`Show admin credentials for ${ticket.lab_id} ${ticket.pc_num}`}
+            title="Show PC admin credentials"
+          >
+            <KeyRound size={14} aria-hidden="true" />
+          </button>
         </div>
       </td>
     </tr>
   );
 }
 
-export default function TicketTable() {
-  const { filteredTickets, dispatch, confirmRepair, resolve } = useTickets();
+interface TicketTableProps {
+  /** OPEN = pending / dispatched / under repair, RESOLVED = resolved only (default: everything) */
+  scope?: 'OPEN' | 'RESOLVED';
+}
+
+export default function TicketTable({ scope }: TicketTableProps = {}) {
+  const { filteredTickets: allFilteredTickets, dispatch, confirmRepair, resolve } = useTickets();
+  const filteredTickets = scope
+    ? allFilteredTickets.filter((t) => (scope === 'RESOLVED' ? t.status === 'RESOLVED' : t.status !== 'RESOLVED'))
+    : allFilteredTickets;
   const toast = useToast();
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [ticketToDispatch, setTicketToDispatch] = useState<Ticket | null>(null);
+  const [credentialTicket, setCredentialTicket] = useState<Ticket | null>(null);
+  const credentialTarget: RevealTarget | null = credentialTicket
+    ? { scope: 'PC', labCode: credentialTicket.lab_id, pcNum: credentialTicket.pc_num, label: `${credentialTicket.lab_id} ${credentialTicket.pc_num}` }
+    : null;
 
   const handleConfirmDispatch = async (ticketId: string, technicianName: string, dispatchNotes?: string) => {
     await dispatch(ticketId, technicianName);
@@ -272,6 +297,7 @@ export default function TicketTable() {
                     onOpenDispatchModal={setTicketToDispatch}
                     onConfirmRepair={handleConfirmRepair}
                     onResolveTicket={handleResolveTicket}
+                    onShowCredentials={setCredentialTicket}
                   />
                 ))}
               </tbody>
@@ -292,6 +318,12 @@ export default function TicketTable() {
       )}
 
       {/* Technician Dispatch Selection Modal (Queried from Database) */}
+      <CredentialRevealDialog
+        target={credentialTarget}
+        defaultReason={credentialTicket ? `Ticket ${credentialTicket.ticket_id}: ${credentialTicket.category} issue` : ''}
+        onClose={() => setCredentialTicket(null)}
+      />
+
       {ticketToDispatch && (
         <TechnicianDispatchModal
           ticket={ticketToDispatch}

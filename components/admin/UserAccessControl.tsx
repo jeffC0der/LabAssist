@@ -7,6 +7,7 @@ import {
 import { useToast } from '@/context/ToastContext';
 import { useAuth } from '@/context/AuthContext';
 import type { UserRole } from '@/context/AuthContext';
+import ModalPortal from '@/components/shared/ModalPortal';
 
 interface DBUser {
   id: string;
@@ -543,6 +544,7 @@ export default function UserAccessControl() {
 
       {/* ── Passcode Modal ────────────────────────────────────────────────────── */}
       {isPasscodeModalOpen && (
+        <ModalPortal>
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
           onClick={() => setIsPasscodeModalOpen(false)}
@@ -621,6 +623,7 @@ export default function UserAccessControl() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

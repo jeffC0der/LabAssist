@@ -3,6 +3,7 @@ import React, { useEffect, useRef } from 'react';
 import { X, Monitor, Keyboard, Zap, Wifi, Clock, User, CheckCircle, AlertTriangle, Radio } from 'lucide-react';
 import type { Ticket } from '@/lib/mockData';
 import { getCategoryColors, getStatusColors, getPriorityColors, formatFullTimestamp } from '@/lib/utils';
+import ModalPortal from '@/components/shared/ModalPortal';
 
 interface ViewDetailsModalProps {
   ticket: Ticket;
@@ -38,6 +39,7 @@ export default function ViewDetailsModal({ ticket, onClose, onDispatch, onConfir
   }, [onClose]);
 
   return (
+    <ModalPortal>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop animate-fade-in"
       role="dialog"
@@ -194,5 +196,6 @@ export default function ViewDetailsModal({ ticket, onClose, onDispatch, onConfir
         )}
       </div>
     </div>
+    </ModalPortal>
   );
 }

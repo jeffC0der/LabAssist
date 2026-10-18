@@ -6,7 +6,7 @@ export const revalidate = 0;
 
 export interface AppNotification {
   id: string;
-  category: 'TICKET' | 'REPAIR' | 'PAYMENT';
+  category: 'TICKET' | 'REPAIR' | 'PAYMENT' | 'SECURITY';
   title: string;
   message: string;
   linkTab: string | null;

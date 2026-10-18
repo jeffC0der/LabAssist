@@ -48,6 +48,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { useRepairs, DeviceRepair, RepairStatus } from '@/context/RepairContext';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import ModalPortal from '@/components/shared/ModalPortal';
 
 const LAB_ROOM_OPTIONS = [
   { code: 'LAB-101', name: 'Embedded Systems & IoT Lab (1st Floor)' },
@@ -2204,6 +2205,7 @@ export default function TechnicianRepairsWorkbench() {
           declineModalTarget.status
         );
         return (
+          <ModalPortal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
             <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-rose-500/40 shadow-2xl p-6 space-y-5">
               <div className="flex items-center gap-3 text-rose-400 pb-3 border-b border-slate-800">
@@ -2293,11 +2295,13 @@ export default function TechnicianRepairsWorkbench() {
               </div>
             </div>
           </div>
+          </ModalPortal>
         );
       })()}
 
       {/* ── BILLING & INVOICE GENERATION MODAL ─────────────────────────── */}
       {billingTarget && (
+        <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
           <div className="w-full max-w-3xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/40 shadow-2xl p-6 space-y-6">
             {/* Header */}
@@ -2635,10 +2639,12 @@ export default function TechnicianRepairsWorkbench() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* ── VIEW INVOICE MODAL ─────────────────────────── */}
       {invoiceViewData && (
+        <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
           <div className="w-full max-w-2xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/40 shadow-2xl p-6 sm:p-8 space-y-6 text-slate-200">
             {/* Invoice Top Header */}
@@ -2795,10 +2801,12 @@ export default function TechnicianRepairsWorkbench() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* ── READY FOR PICKUP CONFIRMATION MODAL ── */}
       {pickupModalTarget && (
+        <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
           <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-emerald-500/40 shadow-2xl p-6 space-y-5">
             <div className="flex items-start justify-between pb-3 border-b border-slate-800">
@@ -2880,10 +2888,12 @@ export default function TechnicianRepairsWorkbench() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* ── PAYMENT SETTLEMENT MODAL (CASE 2: UNPAID) ── */}
       {settlementModalTarget && (
+        <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
           <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-amber-500/50 shadow-2xl p-6 space-y-5">
             <div className="flex items-start justify-between pb-3 border-b border-slate-800">
@@ -3065,10 +3075,12 @@ export default function TechnicianRepairsWorkbench() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* ── DEVICE RELEASE & COMPLETION MODAL ── */}
       {releaseModalTarget && (
+        <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
           <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-emerald-500/50 shadow-2xl p-6 space-y-5">
             <div className="flex items-start justify-between pb-3 border-b border-slate-800">
@@ -3166,10 +3178,12 @@ export default function TechnicianRepairsWorkbench() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* ── FINAL RELEASE & JOB ORDER COMPLETION RECEIPT MODAL ── */}
       {finalReceiptData && (
+        <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
           <div className="w-full max-w-3xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/50 shadow-2xl p-6 sm:p-8 space-y-6">
             {/* Header / Brand */}
@@ -3357,6 +3371,7 @@ export default function TechnicianRepairsWorkbench() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

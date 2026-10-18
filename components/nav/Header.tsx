@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { Wifi, User, LogOut, Shield, Wrench, GraduationCap, ChevronDown, Bell, ShieldCheck, UserCog, Ticket, CreditCard } from 'lucide-react';
+import { Wifi, User, LogOut, Shield, Wrench, GraduationCap, ChevronDown, Bell, ShieldCheck, UserCog, Ticket, CreditCard, KeyRound } from 'lucide-react';
 import { useNotifications, timeAgo, OPEN_PORTAL_TAB_EVENT } from '@/context/NotificationContext';
 import type { AppNotification } from '@/app/api/notifications/route';
 import { useAuth } from '@/context/AuthContext';
@@ -60,6 +60,8 @@ export default function Header() {
       <Ticket size={13} className="text-cyan-400" />
     ) : category === 'REPAIR' ? (
       <Wrench size={13} className="text-violet-400" />
+    ) : category === 'SECURITY' ? (
+      <KeyRound size={13} className="text-rose-400" />
     ) : (
       <CreditCard size={13} className="text-emerald-400" />
     );

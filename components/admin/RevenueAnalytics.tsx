@@ -25,6 +25,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
+import ModalPortal from '@/components/shared/ModalPortal';
 
 interface RevenueMetrics {
   grossRevenue: number;
@@ -695,6 +696,7 @@ export default function RevenueAnalytics() {
 
       {/* ── Record Payment Modal ────────────────────────────────────────────── */}
       {isRecordModalOpen && (
+        <ModalPortal>
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
           onClick={() => setIsRecordModalOpen(false)}
@@ -901,6 +903,7 @@ export default function RevenueAnalytics() {
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

@@ -4,6 +4,7 @@ import { User, Wrench, Shield, CheckCircle2, AlertCircle, X, Sparkles, Loader2, 
 import type { Ticket } from '@/lib/mockData';
 import { getCategoryColors } from '@/lib/utils';
 import type { AvailableTechnician } from '@/app/api/technicians/route';
+import ModalPortal from '@/components/shared/ModalPortal';
 
 interface TechnicianDispatchModalProps {
   ticket: Ticket;
@@ -79,6 +80,7 @@ export default function TechnicianDispatchModal({
   };
 
   return (
+    <ModalPortal>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop animate-fade-in"
       role="dialog"
@@ -282,5 +284,6 @@ export default function TechnicianDispatchModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

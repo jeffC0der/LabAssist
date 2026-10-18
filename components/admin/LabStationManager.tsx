@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Layers, Plus, Cpu, MapPin, X, RefreshCw } from 'lucide-react';
 import type { LabRoom } from '@/app/api/admin/labs/route';
 import { useToast } from '@/context/ToastContext';
+import ModalPortal from '@/components/shared/ModalPortal';
 
 export default function LabStationManager() {
   const toast = useToast();
@@ -287,6 +288,7 @@ export default function LabStationManager() {
 
       {/* Register Lab Room Modal */}
       {isAddModalOpen && (
+        <ModalPortal>
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
           onClick={() => setIsAddModalOpen(false)}
@@ -415,6 +417,7 @@ export default function LabStationManager() {
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

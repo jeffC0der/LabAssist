@@ -57,6 +57,9 @@ export function WorkstationProvider({ children }: { children: React.ReactNode })
               const status = row.status as WorkstationStatus;
               const activeIssue = row.active_issue || undefined;
 
+              // An updated PC that isn't in this room yet was moved from another room (PC Inventory):
+              // reload so it also disappears from its old room
+              let movedFromAnotherRoom = false;
               setWorkstations((prev) => {
                 const labStations = prev[lab] ? [...prev[lab]] : [];
                 const idx = labStations.findIndex((s) => s.id === pcId);
@@ -66,7 +69,12 @@ export function WorkstationProvider({ children }: { children: React.ReactNode })
                     status,
                     activeIssue,
                     user: row.assigned_user || undefined,
+                    ...(row.ip_address ? { ip: row.ip_address } : {}),
+                    ...(row.specs ? { specs: row.specs } : {}),
                   };
+                } else if (payload.eventType === 'UPDATE') {
+                  movedFromAnotherRoom = true;
+                  return prev;
                 } else {
                   labStations.push({
                     id: pcId,
@@ -81,6 +89,7 @@ export function WorkstationProvider({ children }: { children: React.ReactNode })
                 }
                 return { ...prev, [lab]: labStations };
               });
+              if (movedFromAnotherRoom) refreshWorkstations();
             }
           }
         )

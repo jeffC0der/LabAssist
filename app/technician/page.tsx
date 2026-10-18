@@ -2,9 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/nav/Header';
-import MetricsBar from '@/components/dashboard/MetricsBar';
-import FilterBar from '@/components/dashboard/FilterBar';
-import TicketTable from '@/components/dashboard/TicketTable';
 import WorkstationGrid from '@/components/student/WorkstationGrid';
 import TechnicianRepairsWorkbench from '@/components/technician/TechnicianRepairsWorkbench';
 import { useAuth } from '@/context/AuthContext';
@@ -12,9 +9,11 @@ import { useTickets } from '@/context/TicketContext';
 import { useWorkstations } from '@/context/WorkstationContext';
 import { useRepairs } from '@/context/RepairContext';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
-import { Wrench, Monitor, ListOrdered, Sparkles, Layers, Shield } from 'lucide-react';
+import { Wrench, Monitor, ListOrdered, Sparkles, Layers, Shield, HardDrive } from 'lucide-react';
+import PcInventory from '@/components/dashboard/PcInventory';
+import TicketQueueSection from '@/components/dashboard/TicketQueueSection';
 
-export type TechnicianTab = 'PC_DISPLAY' | 'DISPATCH_QUEUE' | 'REPAIRS';
+export type TechnicianTab = 'PC_DISPLAY' | 'DISPATCH_QUEUE' | 'REPAIRS' | 'INVENTORY';
 
 interface TabItem {
   id: TechnicianTab;
@@ -80,6 +79,12 @@ export default function TechnicianPage() {
       label: 'Repairs & Job Cards',
       icon: <Wrench size={15} />,
       badge: `${activeRepairCount} Active`,
+    },
+    {
+      id: 'INVENTORY',
+      label: 'PC Inventory',
+      icon: <HardDrive size={15} />,
+      badge: `${allStations.length} PCs`,
     },
   ];
 
@@ -193,15 +198,15 @@ export default function TechnicianPage() {
             )}
 
             {activeTab === 'DISPATCH_QUEUE' && (
-              <section aria-label="Ticket Queue & Dispatch" className="animate-fade-in space-y-6">
-                {/* KPI Metrics */}
-                <MetricsBar />
+              <section aria-label="Ticket Queue & Dispatch" className="animate-fade-in">
+                {/* Pending / Resolved tickets and PC admin credentials */}
+                <TicketQueueSection />
+              </section>
+            )}
 
-                {/* Filters */}
-                <FilterBar />
-
-                {/* Ticket Table */}
-                <TicketTable />
+            {activeTab === 'INVENTORY' && (
+              <section aria-label="PC Inventory" className="animate-fade-in">
+                <PcInventory />
               </section>
             )}
 

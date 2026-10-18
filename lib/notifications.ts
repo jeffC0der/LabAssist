@@ -3,7 +3,7 @@ import { getServiceClient } from '@/lib/serverAuth';
 // Server-only: create in-app notifications for users when something happens to their
 // report, repair or payment. Never throws — a failed notification must not break the action.
 
-export type NotificationCategory = 'TICKET' | 'REPAIR' | 'PAYMENT';
+export type NotificationCategory = 'TICKET' | 'REPAIR' | 'PAYMENT' | 'SECURITY';
 
 export interface NotifyInput {
   /** Recipient account id; when missing, resolved from `email` via profiles */
@@ -47,6 +47,25 @@ export async function notifyUser(input: NotifyInput): Promise<void> {
     if (error) console.warn('[notifications] insert failed:', error.message);
   } catch (err) {
     console.warn('[notifications] notifyUser error:', err);
+  }
+}
+
+/** Notify every active admin (optionally skipping the admin who triggered it). Never throws. */
+export async function notifyAdmins(
+  input: Omit<NotifyInput, 'userId' | 'email'>,
+  options: { exceptUserId?: string } = {}
+): Promise<void> {
+  try {
+    const supabase = getServiceClient();
+    if (!supabase) return;
+    const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'ADMIN').eq('status', 'ACTIVE');
+    await Promise.all(
+      (admins || [])
+        .filter((a: any) => a.id !== options.exceptUserId)
+        .map((a: any) => notifyUser({ ...input, userId: a.id }))
+    );
+  } catch (err) {
+    console.warn('[notifications] notifyAdmins error:', err);
   }
 }
 

@@ -5,6 +5,7 @@ import { LAB_ROOMS, type Workstation, type WorkstationStatus, type Ticket } from
 import { useWorkstations } from '@/context/WorkstationContext';
 import { useTickets } from '@/context/TicketContext';
 import { useToast } from '@/context/ToastContext';
+import ModalPortal from '@/components/shared/ModalPortal';
 
 interface WorkstationGridProps {
   onSelectStation?: (lab: string, pcNum: string) => void;
@@ -519,6 +520,7 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
           activeModal.station;
 
         return (
+          <ModalPortal>
           <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
             onClick={() => setActiveModal(null)}
@@ -647,6 +649,7 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
               </div>
             </div>
           </div>
+          </ModalPortal>
         );
       })()}
     </div>

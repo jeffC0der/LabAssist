@@ -6,14 +6,13 @@ import RevenueAnalytics from './RevenueAnalytics';
 import UserAccessControl from './UserAccessControl';
 import LabStationManager from './LabStationManager';
 import WorkstationGrid from '@/components/student/WorkstationGrid';
-import TicketTable from '@/components/dashboard/TicketTable';
-import MetricsBar from '@/components/dashboard/MetricsBar';
-import FilterBar from '@/components/dashboard/FilterBar';
-import { Shield, Radio, BarChart3, DollarSign, Users, Layers, Sparkles, ListOrdered, Monitor } from 'lucide-react';
+import { Shield, Radio, BarChart3, DollarSign, Users, Layers, Sparkles, ListOrdered, Monitor, HardDrive } from 'lucide-react';
+import PcInventory from '@/components/dashboard/PcInventory';
 import { useTickets } from '@/context/TicketContext';
 import { useWorkstations } from '@/context/WorkstationContext';
+import TicketQueueSection from '@/components/dashboard/TicketQueueSection';
 
-type AdminTab = 'WORKSTATIONS' | 'TICKETS' | 'FLEET' | 'ANALYTICS' | 'REVENUE' | 'RBAC' | 'ROOMS';
+type AdminTab = 'WORKSTATIONS' | 'TICKETS' | 'FLEET' | 'ANALYTICS' | 'REVENUE' | 'RBAC' | 'ROOMS' | 'INVENTORY';
 
 export default function AdminConsole() {
   const { tickets } = useTickets();
@@ -43,6 +42,7 @@ export default function AdminConsole() {
     { id: 'REVENUE', label: 'Revenue Analytics', icon: <DollarSign size={15} />, badge: 'Live Ledger' },
     { id: 'RBAC', label: 'User & Access Control', icon: <Users size={15} />, badge: 'Live DB' },
     { id: 'ROOMS', label: 'Lab & Station Manager', icon: <Layers size={15} />, badge: '5 Labs' },
+    { id: 'INVENTORY', label: 'PC Inventory', icon: <HardDrive size={15} />, badge: `${allStations.length} PCs` },
   ];
 
   return (
@@ -144,13 +144,9 @@ export default function AdminConsole() {
             </section>
           )}
           {activeTab === 'TICKETS' && (
-            <div className="space-y-6 animate-fade-in">
-              {/* Metrics & Filter Bar */}
-              <MetricsBar />
-              <FilterBar />
-
-              {/* Ticket Queue with Technician Dispatch & Repair Confirmation */}
-              <TicketTable />
+            <div className="animate-fade-in">
+              {/* Pending / Resolved tickets and PC admin credentials */}
+              <TicketQueueSection />
             </div>
           )}
           {activeTab === 'FLEET' && <TelemetryFleetDiagnostics />}
@@ -158,6 +154,7 @@ export default function AdminConsole() {
           {activeTab === 'REVENUE' && <RevenueAnalytics />}
           {activeTab === 'RBAC' && <UserAccessControl />}
           {activeTab === 'ROOMS' && <LabStationManager />}
+          {activeTab === 'INVENTORY' && <PcInventory />}
         </div>
       </div>
     </div>

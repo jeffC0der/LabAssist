@@ -1,6 +1,6 @@
 'use client';
 import React, { useState } from 'react';
-import { Bell, Ticket, Wrench, CreditCard, CheckCheck, ArrowUpRight, RefreshCw } from 'lucide-react';
+import { Bell, Ticket, Wrench, CreditCard, CheckCheck, ArrowUpRight, RefreshCw, KeyRound } from 'lucide-react';
 import { useNotifications, timeAgo } from '@/context/NotificationContext';
 import type { AppNotification } from '@/app/api/notifications/route';
 
@@ -24,6 +24,11 @@ const CATEGORY_STYLE: Record<AppNotification['category'], { label: string; icon:
     label: 'Payment',
     icon: <CreditCard size={15} />,
     chip: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  },
+  SECURITY: {
+    label: 'Security',
+    icon: <KeyRound size={15} />,
+    chip: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
   },
 };
 

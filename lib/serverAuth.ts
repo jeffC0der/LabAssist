@@ -145,3 +145,8 @@ export async function requireAuth(
 }
 
 export const STAFF_ROLES: AppRole[] = ['TECHNICIAN', 'ADMIN'];
+
+/** The caller's IP address as reported by the hosting proxy (for audit logs). */
+export function getClientIp(request: Request): string | null {
+  return (request.headers.get('x-forwarded-for') || '').split(',')[0].trim() || null;
+}

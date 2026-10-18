@@ -46,6 +46,7 @@ import { useToast } from '@/context/ToastContext';
 import { useRepairs, DeviceRepair, RepairStatus } from '@/context/RepairContext';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { REPAIR_FIELD_LIMITS } from '@/lib/repairLimits';
+import ModalPortal from '@/components/shared/ModalPortal';
 
 export interface RepairIntakeRequest {
   id: string;
@@ -1349,6 +1350,7 @@ export default function RepairServiceCard() {
 
       {/* ── CUSTOMER INVOICE BREAKDOWN MODAL ── */}
       {customerInvoiceModalTarget && (
+        <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
           <div className="w-full max-w-2xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/40 shadow-2xl p-6 sm:p-7 space-y-5">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
@@ -1451,10 +1453,12 @@ export default function RepairServiceCard() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* ── CUSTOMER RELEASE RECEIPT MODAL ── */}
       {customerReceiptModalTarget && (
+        <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
           <div className="w-full max-w-2xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/50 shadow-2xl p-6 sm:p-7 space-y-5">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
@@ -1544,6 +1548,7 @@ export default function RepairServiceCard() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );
