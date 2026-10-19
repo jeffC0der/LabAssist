@@ -1,11 +1,15 @@
 'use client';
-import React, { useState, useMemo } from 'react';
-import { Monitor, User, AlertTriangle, Wifi, Sparkles, ArrowUpRight, X, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { Monitor, User, AlertTriangle, Wifi, Sparkles, ArrowUpRight, X, ArrowLeft, CheckCircle2, Pencil } from 'lucide-react';
 import { LAB_ROOMS, type Workstation, type WorkstationStatus, type Ticket } from '@/lib/mockData';
 import { useWorkstations } from '@/context/WorkstationContext';
 import { useTickets } from '@/context/TicketContext';
 import { useToast } from '@/context/ToastContext';
+import { useAuth } from '@/context/AuthContext';
+import { supabase } from '@/lib/supabaseClient';
 import ModalPortal from '@/components/shared/ModalPortal';
+import LabLayoutEditor from '@/components/dashboard/LabLayoutEditor';
+import { type LabLayout, arrangeRoom } from '@/lib/labLayout';
 
 interface WorkstationGridProps {
   onSelectStation?: (lab: string, pcNum: string) => void;
@@ -66,6 +70,46 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
   // "Needs Attention" view: every Issue Reported / Under Repair PC across all rooms
   const [showAttention, setShowAttention] = useState(false);
   const [activeModal, setActiveModal] = useState<{ lab: string; station: Workstation } | null>(null);
+  const { user } = useAuth();
+  const canEditLayout = user?.role === 'ADMIN' || user?.role === 'TECHNICIAN';
+  // Saved room layouts (table rows per side); rooms without one use the default grid
+  const [layouts, setLayouts] = useState<Record<string, LabLayout>>({});
+  const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
+
+  const layoutRequest = useRef(0);
+  const loadLayouts = useCallback(async () => {
+    // Only the newest request may update the grid (an older, slower response would bring back a past layout)
+    const requestId = ++layoutRequest.current;
+    try {
+      const res = await fetch('/api/labs/layout', { cache: 'no-store' });
+      if (!res.ok || requestId !== layoutRequest.current) return;
+      const data = await res.json();
+      if (requestId !== layoutRequest.current) return;
+      setLayouts(data.layouts || {});
+    } catch {
+      // keep the default grid
+    }
+  }, []);
+  // Keep layouts live for everyone: instant update when any room's layout is saved, plus a periodic
+  // and on-focus refresh in case the live connection drops
+  useEffect(() => {
+    if (!user?.id) return;
+    loadLayouts();
+    const channel = supabase
+      .channel(`public:labs:layout:${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'labs' }, () => loadLayouts())
+      .subscribe();
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') loadLayouts();
+    }, 20000);
+    const onFocus = () => loadLayouts();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      supabase.removeChannel(channel);
+      window.clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [user?.id, loadLayouts]);
 
   // Available lab rooms excluding "All Labs", naturally sorted
   const dbLabs = Object.keys(workstations).filter(k => k !== 'All Labs');
@@ -149,6 +193,114 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
           </span>
         );
     }
+  };
+
+  // Compact PC tile for the room-layout view (many PCs per row, so only the essentials)
+  const renderSeat = (lab: string, station: Workstation, filter: WorkstationStatus | 'ALL') => {
+    const isSelected = selectedStation?.lab === lab && selectedStation?.pcNum === station.id;
+    const isDimmed = filter !== 'ALL' && station.status !== filter;
+    const tone =
+      station.status === 'UNDER_REPAIR'
+        ? { box: 'bg-rose-950/30 border-rose-500/50 hover:border-rose-400', dot: 'bg-rose-500 animate-pulse', text: 'text-rose-300', label: 'Repair' }
+        : station.status === 'ISSUE_REPORTED'
+        ? { box: 'bg-amber-950/30 border-amber-500/50 hover:border-amber-400', dot: 'bg-amber-400 animate-pulse', text: 'text-amber-300', label: 'Issue' }
+        : station.status === 'OCCUPIED'
+        ? { box: 'bg-indigo-950/30 border-indigo-500/40 hover:border-indigo-400', dot: 'bg-indigo-400', text: 'text-indigo-300', label: 'In use' }
+        : { box: 'bg-slate-900/70 border-slate-700/80 hover:border-emerald-500/50', dot: 'bg-emerald-400', text: 'text-emerald-400', label: 'Ready' };
+
+    return (
+      <button
+        key={`${lab}-${station.id}`}
+        type="button"
+        onClick={() => handleStationClick(lab, station)}
+        disabled={isDimmed}
+        title={station.activeIssue || `${station.id} · ${station.status}`}
+        aria-label={`Station ${station.id} in ${lab}, status ${station.status}${isDimmed ? ' (filtered out)' : ''}`}
+        // Width comes from the room (see renderRoomLayout); text scales with the tile's own width
+        style={{ width: 'var(--seat-w)', containerType: 'inline-size' }}
+        className={`flex-shrink-0 rounded-lg sm:rounded-xl border text-left transition-all duration-200 ${
+          isDimmed
+            ? 'opacity-20 grayscale bg-slate-900/20 border-slate-800/30 cursor-not-allowed'
+            : isSelected
+            ? 'bg-indigo-900/50 border-indigo-400 ring-2 ring-indigo-400/50'
+            : `${tone.box} ${filter !== 'ALL' ? 'scale-[1.04] shadow-lg' : ''}`
+        }`}
+      >
+        <div className="seat-body">
+          <div className="flex items-center justify-between gap-1">
+            <Monitor className={`seat-icon ${isDimmed ? 'text-slate-500' : tone.text}`} />
+            <span className={`seat-dot rounded-full ${isDimmed ? 'bg-slate-600' : tone.dot}`} />
+          </div>
+          <p className="seat-id font-mono font-bold text-slate-100 truncate">{station.id}</p>
+          <p className={`seat-label font-semibold uppercase tracking-wide truncate ${isDimmed ? 'text-slate-500' : tone.text}`}>{tone.label}</p>
+          {station.ip && <p className="seat-extra font-mono text-slate-500 truncate">{station.ip}</p>}
+        </div>
+      </button>
+    );
+  };
+
+  // The selected room drawn as its saved layout: table rows on each side of the aisle, front marker
+  const renderRoomLayout = (lab: string, layout: LabLayout) => {
+    const { rows, extraCount } = arrangeRoom(stations, layout);
+    // Only rows with PCs are drawn (seats without a PC are left out), so the room frame fits the PCs it has
+    const filled = rows.filter((r) => r.left.length + r.right.length > 0);
+    const ordered = layout.front === 'BOTTOM' ? [...filled].reverse() : filled;
+    const twoSides = layout.sides === 2;
+
+    // Size every tile from the widest row: the room fills the panel, so fewer PCs per row = bigger tiles.
+    // Tiles stay between SEAT_MIN and SEAT_MAX; below the minimum the room scrolls sideways instead.
+    const SEAT_MIN = 72;
+    const SEAT_MAX = 180;
+    const GAP = 8;
+    const AISLE = twoSides ? 48 : 0;
+    const maxLeft = Math.max(1, ...filled.map((r) => r.left.length));
+    const maxRight = twoSides ? Math.max(1, ...filled.map((r) => r.right.length)) : 0;
+    const cols = maxLeft + maxRight;
+    const fixed = (maxLeft - 1) * GAP + (twoSides ? (maxRight - 1) * GAP + AISLE : 0);
+    const sideWidth = (n: number) => `calc(${n} * var(--seat-w) + ${(n - 1) * GAP}px)`;
+    const roomStyle = {
+      containerType: 'inline-size',
+      minWidth: cols * SEAT_MIN + fixed,
+      maxWidth: cols * SEAT_MAX + fixed,
+      // cqw = width of this room box, so the tile width follows the available space
+      '--seat-w': `calc((100cqw - ${fixed}px) / ${cols})`,
+    } as React.CSSProperties;
+
+    const front = (
+      <div className="w-full text-center py-1.5 sm:py-2 rounded-lg bg-slate-700/30 border border-slate-600/50 text-[10px] sm:text-xs font-semibold tracking-[0.15em] uppercase text-slate-300 px-3 truncate">
+        {layout.frontLabel}
+      </div>
+    );
+    return (
+      <div className="overflow-x-auto rounded-xl border border-slate-800/80 bg-slate-950/40 p-3 sm:p-5">
+        <div className="mx-auto w-full space-y-3 sm:space-y-4" style={roomStyle}>
+          {layout.front === 'TOP' && front}
+          {ordered.map((row, i) => (
+            <div key={i} className="flex items-stretch justify-center">
+              <div className="flex justify-center" style={{ width: sideWidth(maxLeft), gap: GAP }}>
+                {row.left.map((s) => renderSeat(lab, s, statusFilter))}
+              </div>
+              {twoSides && (
+                <>
+                  <div className="flex justify-center flex-shrink-0" style={{ width: AISLE }} aria-hidden="true">
+                    <div className="w-px border-l border-dashed border-slate-700/60" />
+                  </div>
+                  <div className="flex justify-center" style={{ width: sideWidth(maxRight), gap: GAP }}>
+                    {row.right.map((s) => renderSeat(lab, s, statusFilter))}
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+          {layout.front === 'BOTTOM' && front}
+          {extraCount > 0 && canEditLayout && (
+            <p className="text-[10px] sm:text-xs text-slate-500 text-center">
+              {extraCount} PC{extraCount === 1 ? ' was' : 's were'} added to new rows automatically · use Edit Layout to arrange {extraCount === 1 ? 'it' : 'them'}
+            </p>
+          )}
+        </div>
+      </div>
+    );
   };
 
   // One station card (used by the room grid and the Needs Attention view)
@@ -367,6 +519,21 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
               })}
             </select>
           </div>
+
+          {/* Room layout editor (staff only) */}
+          {canEditLayout && (
+            <button
+              type="button"
+              onClick={() => setLayoutEditorOpen(true)}
+              disabled={attentionOpen}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800/90 border border-slate-700 text-slate-300 hover:text-white hover:border-indigo-500/60 disabled:opacity-40 disabled:pointer-events-none transition-all"
+              title={`Arrange how the PCs in ${selectedLab} are laid out`}
+              aria-label={`Edit layout of ${selectedLab}`}
+            >
+              <Pencil size={13} />
+              <span>Edit Layout</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -504,11 +671,32 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
             </button>
           </div>
 
-          {/* Grid of Station Cards — All remain visible, non-matching stations become dimmed */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            {stations.map((station) => renderStationCard(selectedLab, station, statusFilter))}
-          </div>
+          {/* Saved room layout, or the default grid. All PCs stay visible; non-matching ones are dimmed */}
+          {layouts[selectedLab] ? (
+            renderRoomLayout(selectedLab, layouts[selectedLab])
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              {stations.map((station) => renderStationCard(selectedLab, station, statusFilter))}
+            </div>
+          )}
         </>
+      )}
+
+      {layoutEditorOpen && (
+        <LabLayoutEditor
+          labCode={selectedLab}
+          stations={stations}
+          current={layouts[selectedLab] || null}
+          onClose={() => setLayoutEditorOpen(false)}
+          onSaved={(lab, layout) =>
+            setLayouts((prev) => {
+              const next = { ...prev };
+              if (layout) next[lab] = layout;
+              else delete next[lab];
+              return next;
+            })
+          }
+        />
       )}
 
       {/* Quick Station Detail Flyout Modal if clicked */}
