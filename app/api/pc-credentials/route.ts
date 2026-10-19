@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAuth, getServiceClient, getClientIp, STAFF_ROLES } from '@/lib/serverAuth';
-import { encryptCredential, isCredentialsKeyConfigured } from '@/lib/credentialCrypto';
+import { encryptCredential, isCredentialsKeyConfigured, credentialsKeyProblem } from '@/lib/credentialCrypto';
 import { errorResponse, readJson, optUuid, reqStr, PATTERNS } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
@@ -97,7 +97,7 @@ export async function PUT(request: Request) {
 
   try {
     if (!isCredentialsKeyConfigured()) {
-      return NextResponse.json({ error: 'CREDENTIALS_KEY is not configured on the server.' }, { status: 500 });
+      return NextResponse.json({ error: credentialsKeyProblem() }, { status: 500 });
     }
     const supabase = db();
     const body = await readJson(request);

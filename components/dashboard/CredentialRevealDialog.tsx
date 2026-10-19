@@ -34,7 +34,10 @@ export default function CredentialRevealDialog({ target, defaultReason = '', onC
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [unmasked, setUnmasked] = useState<Record<string, boolean>>({});
 
-  // Fresh state every time the dialog opens for a new target
+  // Fresh state every time the dialog opens for a new target. Keyed on what the target points at,
+  // not the object itself: parents (e.g. the live ticket queue) rebuild it on every re-render, which
+  // would otherwise wipe what the user is typing.
+  const targetKey = target ? JSON.stringify(target) : '';
   useEffect(() => {
     setReason(defaultReason);
     setPassword('');
@@ -42,7 +45,8 @@ export default function CredentialRevealDialog({ target, defaultReason = '', onC
     setRevealed(null);
     setSecondsLeft(0);
     setUnmasked({});
-  }, [target, defaultReason]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetKey]);
 
   const close = () => {
     setRevealed(null);

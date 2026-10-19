@@ -8,24 +8,34 @@ const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 
-function getKey(): Buffer {
-  const hex = process.env.CREDENTIALS_KEY;
-  if (!hex || !/^[0-9a-fA-F]{64}$/.test(hex)) {
-    throw new Error(
-      'CREDENTIALS_KEY is missing or invalid (expected 64 hex characters). ' +
-        'Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
-    );
+/** The key as set in the environment, forgiving common paste mistakes in hosting dashboards
+ *  (surrounding quotes, spaces/line breaks, or the "CREDENTIALS_KEY=" prefix pasted along with it). */
+function readKeyHex(): string {
+  return String(process.env.CREDENTIALS_KEY || '')
+    .trim()
+    .replace(/^CREDENTIALS_KEY\s*=\s*/, '')
+    .replace(/^["']|["']$/g, '')
+    .replace(/\s+/g, '');
+}
+
+/** Why the key can't be used (safe to show: never includes the key itself), or null if it's fine. */
+export function credentialsKeyProblem(): string | null {
+  const hex = readKeyHex();
+  if (!hex) return 'CREDENTIALS_KEY is not set on the server. Add it to the environment variables and redeploy.';
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+    return `CREDENTIALS_KEY on the server is not valid: expected 64 hex characters (0-9, a-f), got ${hex.length} characters. Copy the value from .env.local again.`;
   }
-  return Buffer.from(hex, 'hex');
+  return null;
+}
+
+function getKey(): Buffer {
+  const problem = credentialsKeyProblem();
+  if (problem) throw new Error(problem);
+  return Buffer.from(readKeyHex(), 'hex');
 }
 
 export function isCredentialsKeyConfigured(): boolean {
-  try {
-    getKey();
-    return true;
-  } catch {
-    return false;
-  }
+  return credentialsKeyProblem() === null;
 }
 
 /** Encrypts to "iv:tag:ciphertext" (base64 parts). */

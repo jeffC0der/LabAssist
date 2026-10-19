@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireAuth, getServiceClient, getClientIp, STAFF_ROLES } from '@/lib/serverAuth';
-import { decryptCredential, isCredentialsKeyConfigured } from '@/lib/credentialCrypto';
+import { decryptCredential, isCredentialsKeyConfigured, credentialsKeyProblem } from '@/lib/credentialCrypto';
 import { checkLockout, recordFailedAttempt } from '@/lib/lockoutStore';
 import { notifyAdmins } from '@/lib/notifications';
 import { readJson, optUuid, reqStr, PATTERNS, ValidationError, errorResponse } from '@/lib/validation';
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   const supabase = getServiceClient();
   if (!supabase || !anonKey) return NextResponse.json({ error: 'Server configuration error.' }, { status: 500 });
   if (!isCredentialsKeyConfigured()) {
-    return NextResponse.json({ error: 'CREDENTIALS_KEY is not configured on the server.' }, { status: 500 });
+    return NextResponse.json({ error: credentialsKeyProblem() }, { status: 500 });
   }
 
   let body: Record<string, any>;
