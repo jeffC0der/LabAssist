@@ -406,7 +406,7 @@ export default function PcInventory() {
                 </h3>
                 <p className="text-slate-400 mt-0.5">Last updated: {formatUpdated(editing)}</p>
               </div>
-              <button type="button" onClick={() => setEditing(null)} className="p-1 text-slate-400 hover:text-white" aria-label="Close">
+              <button type="button" onClick={() => setEditing(null)} className="p-1 text-slate-400 hover:text-slate-50" aria-label="Close">
                 <X size={18} />
               </button>
             </div>
@@ -511,7 +511,7 @@ export default function PcInventory() {
                 <h3 id="bulk-edit-title" className="text-base font-bold text-slate-100">Bulk edit {bulkRoom}</h3>
                 <p className="text-slate-400 mt-0.5">Applies to all {bulkPcs.length} PCs in this room.</p>
               </div>
-              <button type="button" onClick={() => setBulkRoom(null)} className="p-1 text-slate-400 hover:text-white" aria-label="Close">
+              <button type="button" onClick={() => setBulkRoom(null)} className="p-1 text-slate-400 hover:text-slate-50" aria-label="Close">
                 <X size={18} />
               </button>
             </div>

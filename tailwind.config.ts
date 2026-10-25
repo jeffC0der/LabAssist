@@ -1,5 +1,12 @@
+// Palettes read CSS variables (app/theme-colors.css) so Dark/Light mode can swap every color at once
+const themed = (name: string, shades: number[]) =>
+  Object.fromEntries(shades.map((s) => [s, `rgb(var(--c-${name}-${s}) / <alpha-value>)`]));
+const SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
+const ACCENTS = ['indigo', 'emerald', 'amber', 'rose', 'cyan', 'violet', 'red', 'blue', 'purple', 'orange', 'sky', 'lime', 'green', 'yellow', 'teal', 'pink', 'fuchsia'];
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  darkMode: 'class',
   content: [
     './pages/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
@@ -12,13 +19,15 @@ module.exports = {
       // The page background is a background-only color: as a general color named "base" it also
       // generated a text-base color rule (#0f172a) that turned any "sm:text-base" text near-black
       backgroundColor: {
-        'base': '#0f172a',
+        'base': 'rgb(var(--c-slate-900) / <alpha-value>)',
       },
       colors: {
+        slate: themed('slate', [...SHADES, 750, 850]),
+        ...Object.fromEntries(ACCENTS.map((name) => [name, themed(name, SHADES)])),
         // Base surfaces
-        'surface': '#1e293b',
-        'card': '#1e293b',
-        'border': '#334155',
+        'surface': 'rgb(var(--c-slate-800) / <alpha-value>)',
+        'card': 'rgb(var(--c-slate-800) / <alpha-value>)',
+        'border': 'rgb(var(--c-slate-700) / <alpha-value>)',
         // Accents
         'accent-indigo': '#6366f1',
         'accent-cyan': '#06b6d4',
@@ -29,9 +38,9 @@ module.exports = {
         'status-dispatched': '#3b82f6',
         'status-danger': '#ef4444',
         // Text
-        'text-primary': '#f1f5f9',
-        'text-secondary': '#94a3b8',
-        'text-muted': '#64748b',
+        'text-primary': 'rgb(var(--c-slate-100) / <alpha-value>)',
+        'text-secondary': 'rgb(var(--c-slate-400) / <alpha-value>)',
+        'text-muted': 'rgb(var(--c-slate-500) / <alpha-value>)',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],

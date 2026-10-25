@@ -5,12 +5,13 @@
 @tailwind utilities;
 
 /* ─── CSS Custom Properties ─── */
+/* Palette shades (--c-slate-900 …) live in theme-colors.css; these follow them, so both themes work */
 :root {
-  --bg-base: #0f172a;
-  --bg-surface: #1e293b;
+  --bg-base: rgb(var(--c-slate-900));
+  --bg-surface: rgb(var(--c-slate-800));
   --bg-card: #243044;
-  --border-color: #334155;
-  --border-subtle: #1e293b;
+  --border-color: rgb(var(--c-slate-700));
+  --border-subtle: rgb(var(--c-slate-800));
   --accent-indigo: #6366f1;
   --accent-cyan: #06b6d4;
   --accent-violet: #8b5cf6;
@@ -18,10 +19,27 @@
   --status-resolved: #10b981;
   --status-dispatched: #3b82f6;
   --status-danger: #ef4444;
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --text-primary: rgb(var(--c-slate-100));
+  --text-secondary: rgb(var(--c-slate-400));
+  --text-muted: rgb(var(--c-slate-500));
 }
+html.light {
+  --bg-base: #eef1fb;
+  --bg-card: #ffffff;
+}
+/* Light mode keeps the brand colors: soft indigo / cyan / violet washes behind the frosted cards */
+html.light body {
+  background-color: var(--bg-base);
+  background-image:
+    radial-gradient(70% 55% at 0% 0%, rgba(99, 102, 241, 0.30), transparent 70%),
+    radial-gradient(60% 50% at 100% 0%, rgba(6, 182, 212, 0.26), transparent 70%),
+    radial-gradient(65% 55% at 100% 100%, rgba(139, 92, 246, 0.26), transparent 70%),
+    radial-gradient(60% 50% at 0% 100%, rgba(16, 185, 129, 0.18), transparent 70%),
+    linear-gradient(180deg, #eef1fb 0%, #f3f0fd 100%);
+  min-height: 100vh;
+}
+/* Page wrappers paint the base color too; let the colored body background show through */
+html.light main.bg-base { background-color: transparent; }
 
 /* ─── Base Reset ─── */
 * {
@@ -363,3 +381,101 @@ select:not([multiple]):not([size]):not(.appearance-none) {
 @container (min-width: 120px) {
   .seat-extra { display: block; }
 }
+
+/* ═══════════════════ Light mode ═══════════════════
+   Colors flip through theme-colors.css; these cover the hand-written dark surfaces above and the few
+   places where "white" means "brightest text" rather than "text on a colored button". */
+html.light ::-webkit-scrollbar-track { background: #e2e8f0; }
+html.light ::-webkit-scrollbar-thumb { background: #94a3b8; }
+html.light ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+html.light ::selection { background: rgba(99, 102, 241, 0.25); color: #0f172a; }
+
+html.light .glass {
+  /* Frosted glass: the colored page background glows through, like the dark theme's glass */
+  background: rgba(255, 255, 255, 0.6);
+  border-color: rgba(129, 140, 248, 0.35);
+  box-shadow: 0 1px 2px rgba(49, 46, 129, 0.06), 0 12px 32px -14px rgba(79, 70, 229, 0.28);
+}
+html.light .glass-dark {
+  background: rgba(248, 250, 252, 0.9);
+  border-color: rgba(148, 163, 184, 0.5);
+}
+html.light .nav-blur {
+  background: linear-gradient(90deg, rgba(238, 242, 255, 0.9), rgba(255, 255, 255, 0.88) 45%, rgba(236, 254, 255, 0.9));
+  border-bottom-color: rgba(148, 163, 184, 0.45);
+}
+html.light .dropdown-menu {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.15);
+}
+html.light .kpi-card { background: #ffffff; }
+html.light .shimmer {
+  background: linear-gradient(90deg, rgba(15,23,42,0.04) 25%, rgba(15,23,42,0.09) 50%, rgba(15,23,42,0.04) 75%);
+  background-size: 200% 100%;
+}
+html.light .btn-secondary { color: #475569; border-color: #cbd5e1; }
+html.light .btn-secondary:hover { color: #0f172a; }
+html.light .hero-grid {
+  background-image:
+    linear-gradient(rgba(99,102,241,0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99,102,241,0.08) 1px, transparent 1px);
+}
+
+/* Translucent white overlays/borders are invisible on a light page: use a faint dark tint instead */
+html.light .border-white\/10 { border-color: rgba(15, 23, 42, 0.12); }
+html.light .bg-white\/10, html.light .hover\:bg-white\/5:hover { background-color: rgba(15, 23, 42, 0.05); }
+
+/* Shadows tuned for dark backgrounds are too heavy on light ones */
+html.light .shadow-card { box-shadow: 0 1px 3px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.05); }
+html.light .shadow-2xl { box-shadow: 0 20px 40px -12px rgba(15, 23, 42, 0.25); }
+
+/* Dim text tones meant for dark backgrounds would be nearly invisible on white: keep them readable */
+html.light .text-slate-600, html.light .text-slate-700 { color: rgb(100 116 139); }
+html.light .placeholder-slate-600::placeholder, html.light .placeholder-slate-500::placeholder { color: rgb(148 163 184); }
+
+/* ── Light mode: a dark outline on every rounded surface ──
+   Cards, buttons, inputs, badges, tiles and pop-ups get a crisp near-black edge so nothing blends into
+   the white page. Drawn as an inset outline (no layout shift, follows the rounded corners). Tiny dots,
+   thin progress bars, images and invisible ghost buttons are left alone. */
+html.light :is([class*="rounded"]):is([class^="bg-"], [class*=" bg-"], [class^="border"], [class*=" border"], .glass, .glass-dark, .kpi-card, .dropdown-menu, input, select, textarea):not(
+  [class*="border-transparent"], [class*="rounded-none"], img, svg,
+  [class~="w-1"], [class~="w-1.5"], [class~="w-2"], [class~="w-2.5"], [class~="w-px"],
+  [class~="h-1"], [class~="h-1.5"], [class~="h-2"], [class~="h-2.5"], [class~="h-px"],
+  [class*="animate-ping"]
+) {
+  outline: 1px solid rgb(15 23 42 / 0.85);
+  outline-offset: -1px;
+}
+/* Keep the active field visible: focused inputs swap the black edge for the accent color */
+html.light :is(input, select, textarea):focus,
+html.light :is(input, select, textarea):focus-visible {
+  outline: 2px solid rgb(79 70 229);
+  outline-offset: -2px;
+}
+
+/* ── Smooth Dark ↔ Light switch ──
+   Browsers with view transitions cross-fade the whole page (gradients included); others animate colors. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.45s;
+  animation-timing-function: ease-in-out;
+}
+html.theme-switching,
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition: background-color 0.4s ease, color 0.4s ease, border-color 0.4s ease, outline-color 0.4s ease,
+    fill 0.4s ease, stroke 0.4s ease, box-shadow 0.4s ease !important;
+}
+
+/* Light mode: PC tiles and status cards carry their status color (dark mode is unchanged) */
+html.light [data-seat="ONLINE"] { background-color: rgb(236 253 245 / 0.85); }
+html.light [data-seat="OCCUPIED"] { background-color: rgb(238 242 255 / 0.95); }
+html.light [data-seat="ISSUE_REPORTED"] { background-color: rgb(255 251 235 / 0.95); }
+html.light [data-seat="UNDER_REPAIR"] { background-color: rgb(255 241 242 / 0.95); }
+html.light [data-kpi="ALL"] { background-color: rgb(238 242 255 / 0.7); opacity: 1; }
+html.light [data-kpi="ONLINE"] { background-color: rgb(236 253 245 / 0.8); opacity: 1; }
+html.light [data-kpi="OCCUPIED"] { background-color: rgb(238 242 255 / 0.8); opacity: 1; }
+html.light [data-kpi="ISSUE_REPORTED"] { background-color: rgb(255 251 235 / 0.85); opacity: 1; }
+html.light [data-kpi="UNDER_REPAIR"] { background-color: rgb(255 241 242 / 0.85); opacity: 1; }

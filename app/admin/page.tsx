@@ -35,7 +35,7 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-base pb-12" id="admin-portal-main">
-      <a href="#admin-portal-main" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:bg-violet-500 focus:text-white focus:rounded-lg">
+      <a href="#admin-portal-main" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:bg-violet-500 focus:text-slate-50 focus:rounded-lg">
         Skip to admin console
       </a>
 

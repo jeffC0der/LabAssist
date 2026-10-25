@@ -1,12 +1,14 @@
 'use client';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { KeyRound, RefreshCw, Eye, EyeOff, X, History, Pencil, RotateCcw, Check } from 'lucide-react';
+import { KeyRound, RefreshCw, Eye, EyeOff, X, History, Pencil, RotateCcw, Check, Smartphone, Download } from 'lucide-react';
+import { toCsv, downloadCsv, datedFilename } from '@/lib/csvExport';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ModalPortal from '@/components/shared/ModalPortal';
 import type { CredentialRoom, CredentialPc } from '@/app/api/pc-credentials/route';
 import CredentialRevealDialog, { type RevealTarget } from '@/components/dashboard/CredentialRevealDialog';
 import type { CredentialLogEntry } from '@/app/api/pc-credentials/log/route';
+import AuthenticatorAdminList from '@/components/dashboard/AuthenticatorAdminList';
 
 type SetTarget = { workstationId?: string; labCode: string; label: string; isPc: boolean };
 
@@ -25,7 +27,8 @@ export default function PcCredentialsPanel() {
   const [activeRoom, setActiveRoom] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [view, setView] = useState<'CREDENTIALS' | 'LOG'>('CREDENTIALS');
+  const [view, setView] = useState<'CREDENTIALS' | 'LOG' | 'AUTH'>('CREDENTIALS');
+  const [authRefresh, setAuthRefresh] = useState(0);
 
   // Reveal flow (the dialog owns its own state)
   const [revealTarget, setRevealTarget] = useState<RevealTarget | null>(null);
@@ -120,6 +123,27 @@ export default function PcCredentialsPanel() {
     }
   };
 
+  // Admin: download the access log (audit trail) as a spreadsheet
+  const exportLog = () => {
+    const action = (a: string) =>
+      a === 'REVEAL' ? 'Viewed' : a === 'SET' ? 'Changed' : a === 'CLEAR' ? 'Reset to room' : a === 'AUTH_SETUP' ? 'Linked app' : a === 'AUTH_RESET' ? 'Reset app' : a;
+    const csv = toCsv(logEntries, [
+      { header: 'Date & Time', value: (e) => new Date(e.createdAt).toLocaleString('en-CA', { hour12: false }) },
+      { header: 'Who', value: (e) => e.userName },
+      { header: 'Role', value: (e) => e.userRole },
+      { header: 'Action', value: (e) => action(e.action) },
+      { header: 'Scope', value: (e) => e.scope },
+      { header: 'Room', value: (e) => e.labCode },
+      { header: 'PC', value: (e) => e.pcNum },
+      { header: 'PCs', value: (e) => e.pcsCount },
+      { header: 'Reason', value: (e) => e.reason },
+      { header: 'Result', value: (e) => (e.success ? 'OK' : 'Failed') },
+      { header: 'Failure Reason', value: (e) => e.failureReason },
+      { header: 'IP Address', value: (e) => e.ipAddress },
+    ]);
+    downloadCsv(datedFilename('credential-access-log'), csv);
+  };
+
   const clearOwn = async (pc: CredentialPc) => {
     if (!room) return;
     const res = await fetch('/api/pc-credentials', {
@@ -154,7 +178,7 @@ export default function PcCredentialsPanel() {
         <div className="flex items-center gap-2 self-start sm:self-auto">
           {isAdmin && (
             <div className="flex items-center gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800">
-              {(['CREDENTIALS', 'LOG'] as const).map((v) => (
+              {(['CREDENTIALS', 'LOG', 'AUTH'] as const).map((v) => (
                 <button
                   key={v}
                   type="button"
@@ -163,15 +187,27 @@ export default function PcCredentialsPanel() {
                     view === v ? 'bg-rose-600/80 text-white' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  {v === 'CREDENTIALS' ? <KeyRound size={12} /> : <History size={12} />}
-                  {v === 'CREDENTIALS' ? 'Credentials' : 'Access Log'}
+                  {v === 'CREDENTIALS' ? <KeyRound size={12} /> : v === 'LOG' ? <History size={12} /> : <Smartphone size={12} />}
+                  {v === 'CREDENTIALS' ? 'Credentials' : v === 'LOG' ? 'Access Log' : 'Authenticators'}
                 </button>
               ))}
             </div>
           )}
+          {view === 'LOG' && isAdmin && (
+            <button
+              type="button"
+              onClick={exportLog}
+              disabled={logEntries.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900/60 border border-slate-800 text-slate-300 hover:text-slate-50 disabled:opacity-40"
+              title="Download the access log as a spreadsheet (CSV, opens in Excel)"
+            >
+              <Download size={13} />
+              Export CSV
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => (view === 'LOG' ? loadLog() : loadRooms())}
+            onClick={() => (view === 'LOG' ? loadLog() : view === 'AUTH' ? setAuthRefresh((n) => n + 1) : loadRooms())}
             className="p-2 rounded-xl bg-slate-900/60 border border-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
             title="Refresh"
           >
@@ -186,7 +222,9 @@ export default function PcCredentialsPanel() {
         </div>
       )}
 
-      {view === 'LOG' && isAdmin ? (
+      {view === 'AUTH' && isAdmin ? (
+        <AuthenticatorAdminList refreshKey={authRefresh} />
+      ) : view === 'LOG' && isAdmin ? (
         /* ── Access log (admin) ─────────────────────────────────────────── */
         <div className="overflow-x-auto rounded-xl border border-slate-800/80">
           <table className="w-full text-xs">
@@ -218,11 +256,11 @@ export default function PcCredentialsPanel() {
                           : 'bg-slate-800 text-slate-300 border-slate-700'
                       }`}
                     >
-                      {e.action === 'REVEAL' ? 'VIEWED' : e.action === 'SET' ? 'CHANGED' : 'RESET TO ROOM'}
+                      {e.action === 'REVEAL' ? 'VIEWED' : e.action === 'SET' ? 'CHANGED' : e.action === 'AUTH_SETUP' ? 'LINKED APP' : e.action === 'AUTH_RESET' ? 'RESET APP' : 'RESET TO ROOM'}
                     </span>
                   </td>
                   <td className="px-3 py-2 font-mono text-slate-300 whitespace-nowrap">
-                    {e.scope === 'ALL' ? `All PCs${e.pcsCount ? ` (${e.pcsCount})` : ''}` : e.scope === 'ROOM' ? `${e.labCode}${e.pcsCount ? ` (${e.pcsCount} PCs)` : ''}` : `${e.labCode} ${e.pcNum}`}
+                    {e.action === 'AUTH_SETUP' || e.action === 'AUTH_RESET' ? 'Authenticator' : e.scope === 'ALL' ? `All PCs${e.pcsCount ? ` (${e.pcsCount})` : ''}` : e.scope === 'ROOM' ? `${e.labCode}${e.pcsCount ? ` (${e.pcsCount} PCs)` : ''}` : `${e.labCode} ${e.pcNum}`}
                   </td>
                   <td className="px-3 py-2 text-slate-400 min-w-[180px] [overflow-wrap:anywhere]">{e.reason || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap">
@@ -417,7 +455,7 @@ export default function PcCredentialsPanel() {
                       : 'Used by every PC in this room that has no credentials of its own.'}
                   </p>
                 </div>
-                <button type="button" onClick={() => setSetTarget(null)} className="p-1 text-slate-400 hover:text-white" aria-label="Close">
+                <button type="button" onClick={() => setSetTarget(null)} className="p-1 text-slate-400 hover:text-slate-50" aria-label="Close">
                   <X size={18} />
                 </button>
               </div>

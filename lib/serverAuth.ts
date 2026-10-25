@@ -6,8 +6,10 @@ import { createClient, type SupabaseClient, type User as SupabaseUser } from '@s
 // (attached automatically by lib/apiAuthFetch.ts); the role always comes from the
 // profiles table, never from anything the client sends.
 //
-// Two-factor login: accounts with app_metadata.require_login_otp only count as signed in when
-// their Supabase session passed the emailed code (recorded in public.verified_sessions).
+// Two-factor login: a session only counts as signed in once it passed its second factor (recorded in
+// public.verified_sessions):
+//   • technicians and admins: always, with the code from their authenticator app (Google Authenticator)
+//   • students with app_metadata.require_login_otp: the emailed code
 // app_metadata can only be written with the service-role key, so users can't switch it off
 // from the browser, and sessions obtained directly from Supabase (skipping the code) are refused.
 
@@ -48,6 +50,11 @@ export function sessionIdFromToken(accessToken: string): string | null {
 
 export function requiresLoginOtp(user: Pick<SupabaseUser, 'app_metadata'>): boolean {
   return user.app_metadata?.require_login_otp === true;
+}
+
+/** Staff sign in with an authenticator app; everyone else only if they turned on the emailed code. */
+export function requiresSecondFactor(user: Pick<SupabaseUser, 'app_metadata'>, role: AppRole): boolean {
+  return role === 'TECHNICIAN' || role === 'ADMIN' || requiresLoginOtp(user);
 }
 
 /** Record that a session passed two-factor verification. */
@@ -96,14 +103,15 @@ export async function getSessionUser(request: Request): Promise<SessionUser | nu
   if (profile?.status === 'SUSPENDED') return null;
 
   const sessionId = sessionIdFromToken(token);
-  const secondFactorOk = !requiresLoginOtp(data.user) || (await isSessionVerified(sessionId));
+  const role = (profile?.role as AppRole) || 'STUDENT';
+  const secondFactorOk = !requiresSecondFactor(data.user, role) || (await isSessionVerified(sessionId));
 
   const email = (data.user.email || '').toLowerCase();
   return {
     id: data.user.id,
     email,
     name: profile?.name || data.user.user_metadata?.full_name || email.split('@')[0],
-    role: (profile?.role as AppRole) || 'STUDENT',
+    role,
     sessionId,
     secondFactorOk,
   };
@@ -132,7 +140,12 @@ export async function requireAuth(
   if (!sessionUser.secondFactorOk) {
     return {
       response: NextResponse.json(
-        { error: 'Enter the verification code sent to your email to finish signing in.', code: 'second_factor_required' },
+        {
+          error: STAFF_ROLES.includes(sessionUser.role)
+            ? 'Enter the code from your authenticator app to finish signing in.'
+            : 'Enter the verification code sent to your email to finish signing in.',
+          code: 'second_factor_required',
+        },
         { status: 401 }
       ),
     };

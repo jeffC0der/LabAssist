@@ -446,7 +446,27 @@ export default function ProfileSettingsModal({
           ) : (
             /* TAB 2: Security & Login OTP */
             <div className="space-y-4">
-              {/* ── Feature: On / Off Button for Login OTP Code ── */}
+              {/* ── Staff: sign-in always uses their authenticator app (email codes don't apply) ── */}
+              {user?.role === 'ADMIN' || user?.role === 'TECHNICIAN' ? (
+                <div className="p-4 rounded-xl bg-gradient-to-br from-slate-900 to-indigo-950/40 border border-indigo-500/30 shadow-md flex gap-3">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                    <ShieldCheck size={18} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-xs font-bold text-slate-100">Authenticator App Sign-In</h3>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        Always on
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                      Staff accounts sign in with the code from Google Authenticator, and the same code unlocks PC credentials.
+                      Lost or replaced your phone? Ask an administrator to reset your authenticator.
+                    </p>
+                  </div>
+                </div>
+              ) : (
               <div className="p-4 rounded-xl bg-gradient-to-br from-slate-900 to-indigo-950/40 border border-indigo-500/30 shadow-md">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex gap-3">
@@ -499,6 +519,7 @@ export default function ProfileSettingsModal({
                   </button>
                 </div>
               </div>
+              )}
 
               {/* ── Change Password Section ── */}
               <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-3">

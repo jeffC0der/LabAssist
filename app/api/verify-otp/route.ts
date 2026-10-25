@@ -190,7 +190,8 @@ export async function POST(request: Request) {
     // login for that session (only if it belongs to the same account)
     if (purpose === 'login' || purpose === 'oauth_signup') {
       const caller = await getSessionUser(request);
-      if (caller && caller.email === cleanEmail && caller.sessionId) {
+      // Staff complete sign-in with their authenticator app only, never an emailed code
+      if (caller && caller.email === cleanEmail && caller.sessionId && caller.role === 'STUDENT') {
         await markSessionVerified(caller.sessionId, caller.id);
       }
     }

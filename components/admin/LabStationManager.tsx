@@ -312,7 +312,7 @@ export default function LabStationManager() {
               <button
                 type="button"
                 onClick={() => setIsAddModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1"
+                className="text-slate-400 hover:text-slate-50 p-1"
               >
                 <X size={18} />
               </button>

@@ -9,6 +9,7 @@ import type { AppNotification } from '@/app/api/notifications/route';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ProfileSettingsModal from '@/components/profile/ProfileSettingsModal';
+import ThemeToggle from '@/components/shared/ThemeToggle';
 
 export default function Header() {
   const { user, role, signOut, isAuthenticated } = useAuth();
@@ -172,8 +173,9 @@ export default function Header() {
           )}
         </nav>
 
-        {/* Right: Notifications & User Profile */}
+        {/* Right: Theme switch, Notifications & User Profile */}
         <div className="flex items-center gap-2.5 flex-shrink-0">
+          <ThemeToggle />
 
           {/* Notification bell: the user's real notifications (newest 5, short titles) */}
           <div className="relative" ref={notifRef}>
@@ -336,7 +338,7 @@ export default function Header() {
                       <ShieldCheck size={13} className="text-indigo-400 group-hover:text-indigo-300" />
                       <span>Account & Security</span>
                     </div>
-                    {user?.requireLoginOtp && (
+                    {user?.requireLoginOtp && user?.role === 'STUDENT' && (
                       <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                         OTP ON
                       </span>

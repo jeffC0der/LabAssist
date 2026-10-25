@@ -1,16 +1,13 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { requireAuth, getServiceClient, getClientIp, STAFF_ROLES } from '@/lib/serverAuth';
 import { decryptCredential, isCredentialsKeyConfigured, credentialsKeyProblem } from '@/lib/credentialCrypto';
+import { verifyTotp } from '@/lib/totp';
 import { checkLockout, recordFailedAttempt } from '@/lib/lockoutStore';
 import { notifyAdmins } from '@/lib/notifications';
 import { readJson, optUuid, reqStr, PATTERNS, ValidationError, errorResponse } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 const MAX_REVEALS_PER_HOUR = 10;
 const SHOW_SECONDS = { PC: 60, ROOM: 120, ALL: 180 } as const;
@@ -27,9 +24,10 @@ export interface RevealedCredential {
 
 /**
  * POST /api/pc-credentials/reveal
- * Body: { password, reason, scope: 'PC' | 'ROOM' | 'ALL', workstationId?, labCode? }
+ * Body: { code, reason, scope: 'PC' | 'ROOM' | 'ALL', workstationId?, labCode?, pcNum? }
  *
- * Staff re-enter their own password for every reveal; each attempt (successful or not) is
+ * Every reveal needs the current 6-digit code from the staff member's authenticator app (Google
+ * Authenticator), linked once via /api/pc-credentials/authenticator. Each attempt (successful or not) is
  * written to credential_access_log and admins are notified of every reveal.
  */
 export async function POST(request: Request) {
@@ -37,7 +35,7 @@ export async function POST(request: Request) {
   if (auth.response) return auth.response;
 
   const supabase = getServiceClient();
-  if (!supabase || !anonKey) return NextResponse.json({ error: 'Server configuration error.' }, { status: 500 });
+  if (!supabase) return NextResponse.json({ error: 'Server configuration error.' }, { status: 500 });
   if (!isCredentialsKeyConfigured()) {
     return NextResponse.json({ error: credentialsKeyProblem() }, { status: 500 });
   }
@@ -48,13 +46,13 @@ export async function POST(request: Request) {
     optUuid(body.workstationId, 'PC');
     if (body.labCode !== undefined) reqStr(String(body.labCode).toUpperCase(), 'Room', { max: 20, pattern: PATTERNS.labCode });
     if (body.pcNum !== undefined) reqStr(body.pcNum, 'PC number', { max: 10, pattern: PATTERNS.pcNum });
-    if (typeof body.password === 'string' && body.password.length > 128) throw new ValidationError('Password is too long.');
+    if (body.code !== undefined && String(body.code).length > 10) throw new ValidationError('Enter the 6-digit code from your authenticator app.');
   } catch (err) {
     return errorResponse(err, 'api/pc-credentials/reveal');
   }
   const scope: 'PC' | 'ROOM' | 'ALL' = ['PC', 'ROOM', 'ALL'].includes(body.scope) ? body.scope : 'PC';
   const reason = String(body.reason || '').trim();
-  const password = String(body.password || '');
+  const code = String(body.code || '').replace(/s/g, '');
   const me = auth.user;
 
   // Resolve which PCs are being revealed
@@ -105,7 +103,9 @@ export async function POST(request: Request) {
   if (reason.length < 3 || reason.length > 200) {
     return NextResponse.json({ error: 'Enter a reason (3–200 characters) for viewing the credentials.' }, { status: 400 });
   }
-  if (!password) return NextResponse.json({ error: 'Enter your password to continue.' }, { status: 400 });
+  if (!/^\d{6}$/.test(code)) {
+    return NextResponse.json({ error: 'Enter the 6-digit code from your authenticator app.' }, { status: 400 });
+  }
 
   // 1. Locked accounts can't reveal
   const lock = await checkLockout(me.email);
@@ -114,22 +114,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Your account is temporarily locked. Try again later.' }, { status: 423 });
   }
 
-  // 2. Re-check the user's own password (a throwaway session, signed out right away)
-  const checker = createClient(supabaseUrl, anonKey, { auth: { autoRefreshToken: false, persistSession: false } });
-  const { data: check, error: checkErr } = await checker.auth.signInWithPassword({ email: me.email, password });
-  if (checkErr || !check.session) {
+  // 2. The current code from the user's own authenticator app (each code works only once)
+  const { data: authenticator, error: authErr } = await supabase
+    .from('staff_authenticators')
+    .select('secret_enc, confirmed_at, last_used_step')
+    .eq('user_id', me.id)
+    .maybeSingle();
+  if (authErr && /staff_authenticators/.test(authErr.message)) {
+    return NextResponse.json({ error: 'The authenticator is not set up yet. Run supabase_staff_authenticator.sql in the Supabase SQL editor.' }, { status: 500 });
+  }
+  if (!authenticator?.confirmed_at) {
+    return NextResponse.json(
+      { error: 'Link your authenticator app first.', code: 'authenticator_required' },
+      { status: 403 }
+    );
+  }
+  const step = verifyTotp(decryptCredential(authenticator.secret_enc), code, authenticator.last_used_step ?? null);
+  if (step === null) {
     const failure = await recordFailedAttempt(me.email);
-    await log(false, { failure_reason: 'wrong password' });
+    await log(false, { failure_reason: 'wrong authenticator code' });
     return NextResponse.json(
       {
         error: failure.isLocked
-          ? 'Too many wrong passwords. Your account is temporarily locked.'
-          : `Incorrect password. ${failure.attemptsLeft} attempt${failure.attemptsLeft === 1 ? '' : 's'} left.`,
+          ? 'Too many wrong codes. Your account is temporarily locked.'
+          : `Incorrect or expired code. Wait for a new code in the app and try again (${failure.attemptsLeft} attempt${failure.attemptsLeft === 1 ? '' : 's'} left).`,
       },
       { status: failure.isLocked ? 423 : 401 }
     );
   }
-  await checker.auth.signOut({ scope: 'local' });
+  await supabase.from('staff_authenticators').update({ last_used_step: step }).eq('user_id', me.id);
 
   // 3. Rate limit: successful reveals in the last hour
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();

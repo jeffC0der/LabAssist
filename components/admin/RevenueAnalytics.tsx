@@ -23,7 +23,9 @@ import {
   ChevronRight,
   X,
   Loader2,
+  Download,
 } from 'lucide-react';
+import { toCsv, downloadCsv, datedFilename } from '@/lib/csvExport';
 import { useToast } from '@/context/ToastContext';
 import ModalPortal from '@/components/shared/ModalPortal';
 
@@ -221,6 +223,26 @@ export default function RevenueAnalytics() {
     });
   }, [transactions, statusFilter, channelFilter, searchTxQuery]);
 
+  // Export exactly what the ledger shows (search and status filter applied) as a spreadsheet
+  const exportLedger = () => {
+    const csv = toCsv(filteredTransactions, [
+      { header: 'Payment Date', value: (t) => (t.paymentDate ? new Date(t.paymentDate).toLocaleDateString('en-CA') : '') },
+      { header: 'Payment ID', value: (t) => t.paymentNumber },
+      { header: 'Invoice', value: (t) => t.invoiceNumber },
+      { header: 'Job Order', value: (t) => t.jobOrderNumber },
+      { header: 'Client', value: (t) => t.clientName },
+      { header: 'Client Email', value: (t) => t.clientEmail },
+      { header: 'Technician', value: (t) => t.technicianName },
+      { header: 'Payment Method', value: (t) => t.paymentMethod },
+      { header: 'Reference No.', value: (t) => t.referenceNumber },
+      { header: 'Status', value: (t) => t.paymentStatus },
+      { header: 'Amount (PHP)', value: (t) => Number(t.amount || 0).toFixed(2) },
+      { header: 'Notes', value: (t) => t.notes },
+    ]);
+    downloadCsv(datedFilename('revenue-ledger'), csv);
+    toast.success('Ledger exported', `${filteredTransactions.length} payment${filteredTransactions.length === 1 ? '' : 's'} saved as a CSV file.`);
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* ── Top Header Bar ─────────────────────────────────────────────────── */}
@@ -391,7 +413,7 @@ export default function RevenueAnalytics() {
                         ? 'bg-violet-600 text-white'
                         : c === 'CASH'
                         ? 'bg-emerald-600 text-white'
-                        : 'bg-slate-700 text-white'
+                        : 'bg-slate-700 text-slate-50'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
@@ -603,6 +625,17 @@ export default function RevenueAnalytics() {
               />
             </div>
 
+            <button
+              type="button"
+              onClick={exportLedger}
+              disabled={filteredTransactions.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40"
+              title="Download the rows shown below as a spreadsheet (CSV, opens in Excel)"
+            >
+              <Download size={13} />
+              Export CSV
+            </button>
+
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as any)}
@@ -720,7 +753,7 @@ export default function RevenueAnalytics() {
               <button
                 type="button"
                 onClick={() => setIsRecordModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1"
+                className="text-slate-400 hover:text-slate-50 p-1"
               >
                 <X size={18} />
               </button>

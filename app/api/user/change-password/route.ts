@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { requireAuth, getServiceClient, sessionIdFromToken, requiresLoginOtp, markSessionVerified } from '@/lib/serverAuth';
+import { requireAuth, getServiceClient, sessionIdFromToken, requiresSecondFactor, markSessionVerified } from '@/lib/serverAuth';
 import { checkLockout, recordFailedAttempt } from '@/lib/lockoutStore';
 import { errorResponse } from '@/lib/validation';
 
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
     if (renewed?.session) {
       // The user already passed two-factor login in this session, so the new one inherits it
       const sessionId = sessionIdFromToken(renewed.session.access_token);
-      if (sessionId && renewed.user && requiresLoginOtp(renewed.user)) {
+      if (sessionId && renewed.user && requiresSecondFactor(renewed.user, auth.user.role)) {
         await markSessionVerified(sessionId, auth.user.id);
       }
     }

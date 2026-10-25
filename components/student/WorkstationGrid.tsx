@@ -9,7 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabaseClient';
 import ModalPortal from '@/components/shared/ModalPortal';
 import LabLayoutEditor from '@/components/dashboard/LabLayoutEditor';
-import { type LabLayout, arrangeRoom } from '@/lib/labLayout';
+import { type LabLayout, arrangeRoom, suggestLayout } from '@/lib/labLayout';
 
 interface WorkstationGridProps {
   onSelectStation?: (lab: string, pcNum: string) => void;
@@ -74,6 +74,8 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
   const canEditLayout = user?.role === 'ADMIN' || user?.role === 'TECHNICIAN';
   // Saved room layouts (table rows per side); rooms without one use the default grid
   const [layouts, setLayouts] = useState<Record<string, LabLayout>>({});
+  // Saved layouts arrive after the first render; wait for them so a room never flashes the default first
+  const [layoutsLoaded, setLayoutsLoaded] = useState(false);
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
 
   const layoutRequest = useRef(0);
@@ -87,13 +89,18 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
       if (requestId !== layoutRequest.current) return;
       setLayouts(data.layouts || {});
     } catch {
-      // keep the default grid
+      // keep the current layouts
+    } finally {
+      if (requestId === layoutRequest.current) setLayoutsLoaded(true);
     }
   }, []);
   // Keep layouts live for everyone: instant update when any room's layout is saved, plus a periodic
   // and on-focus refresh in case the live connection drops
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setLayoutsLoaded(true); // nothing to load when signed out: show the default room view
+      return;
+    }
     loadLayouts();
     const channel = supabase
       .channel(`public:labs:layout:${Math.random().toString(36).slice(2)}`)
@@ -216,6 +223,7 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
         disabled={isDimmed}
         title={station.activeIssue || `${station.id} · ${station.status}`}
         aria-label={`Station ${station.id} in ${lab}, status ${station.status}${isDimmed ? ' (filtered out)' : ''}`}
+        data-seat={isDimmed ? undefined : station.status}
         // Width comes from the room (see renderRoomLayout); text scales with the tile's own width
         style={{ width: 'var(--seat-w)', containerType: 'inline-size' }}
         className={`flex-shrink-0 rounded-lg sm:rounded-xl border text-left transition-all duration-200 ${
@@ -303,150 +311,6 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
     );
   };
 
-  // One station card (used by the room grid and the Needs Attention view)
-  const renderStationCard = (lab: string, station: Workstation, filter: WorkstationStatus | 'ALL') => {
-    const isSelected = selectedStation?.lab === lab && selectedStation?.pcNum === station.id;
-    const isMatch = filter === 'ALL' || station.status === filter;
-    const isDimmed = filter !== 'ALL' && !isMatch;
-    const isRepair = station.status === 'UNDER_REPAIR';
-    const isIssueReported = station.status === 'ISSUE_REPORTED';
-    const isOccupied = station.status === 'OCCUPIED';
-
-    return (
-      <div
-        key={`${lab}-${station.id}`}
-        onClick={() => {
-          if (isDimmed) return;
-          handleStationClick(lab, station);
-        }}
-        onKeyDown={(e) => {
-          if (isDimmed) return;
-          if (e.key === 'Enter' || e.key === ' ') handleStationClick(lab, station);
-        }}
-        tabIndex={isDimmed ? -1 : 0}
-        role="button"
-        aria-disabled={isDimmed}
-        aria-label={`Station ${station.id} in ${lab}, status ${station.status}${isDimmed ? ' (filtered out)' : ''}`}
-        className={`group relative p-3 rounded-xl border text-left transition-all duration-300 select-none ${
-          isDimmed
-            ? 'opacity-20 grayscale brightness-75 contrast-75 bg-slate-900/20 border-slate-800/30 cursor-not-allowed pointer-events-none'
-            : isSelected
-            ? 'bg-indigo-900/50 border-indigo-400 shadow-glow-indigo ring-2 ring-indigo-400/50 scale-[1.02] cursor-pointer'
-            : filter !== 'ALL'
-            ? /* Actively highlighted matching filter */
-              isRepair
-              ? 'bg-rose-950/35 border-rose-400 shadow-[0_0_20px_rgba(244,63,94,0.3)] ring-1 ring-rose-500/50 scale-[1.02] hover:bg-rose-950/50 cursor-pointer'
-              : isIssueReported
-              ? 'bg-amber-950/35 border-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.3)] ring-1 ring-amber-500/50 scale-[1.02] hover:bg-amber-950/50 cursor-pointer'
-              : isOccupied
-              ? 'bg-indigo-950/35 border-indigo-400 shadow-[0_0_20px_rgba(99,102,241,0.3)] ring-1 ring-indigo-500/50 scale-[1.02] hover:bg-indigo-950/50 cursor-pointer'
-              : 'bg-emerald-950/35 border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.3)] ring-1 ring-emerald-500/50 scale-[1.02] hover:bg-emerald-950/50 cursor-pointer'
-            : /* Normal view when filter === 'ALL' */
-              isRepair
-              ? 'bg-rose-950/20 border-rose-500/40 hover:border-rose-400 hover:bg-rose-950/30 cursor-pointer'
-              : isIssueReported
-              ? 'bg-amber-950/20 border-amber-500/40 hover:border-amber-400 hover:bg-amber-950/30 cursor-pointer'
-              : isOccupied
-              ? 'bg-slate-900/70 border-slate-800 hover:border-indigo-500/40 hover:bg-slate-850 cursor-pointer'
-              : 'bg-slate-900/60 border-slate-800/90 hover:border-emerald-500/40 hover:bg-slate-800/60 cursor-pointer'
-        }`}
-      >
-        {/* Top Station ID & Status Indicator */}
-        <div className="flex items-center justify-between mb-2">
-          <span className={`font-mono text-xs font-bold transition-colors ${
-            isDimmed ? 'text-slate-500' : 'text-slate-200 group-hover:text-white'
-          }`}>
-            {station.id}
-          </span>
-          <span className="flex-shrink-0">
-            {isDimmed ? (
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-600 inline-block" />
-            ) : (
-              <>
-                {station.status === 'ONLINE' && (
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                  </span>
-                )}
-                {station.status === 'OCCUPIED' && (
-                  <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block" />
-                )}
-                {station.status === 'ISSUE_REPORTED' && (
-                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse inline-block" />
-                )}
-                {station.status === 'UNDER_REPAIR' && (
-                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse inline-block" />
-                )}
-              </>
-            )}
-          </span>
-        </div>
-
-        {/* Station Visual Icon / Status */}
-        <div className="flex items-center gap-2 mb-2">
-          <div
-            className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs transition-colors ${
-              isDimmed
-                ? 'bg-slate-800/50 text-slate-500'
-                : isRepair
-                ? 'bg-rose-500/20 text-rose-300'
-                : isIssueReported
-                ? 'bg-amber-500/20 text-amber-300'
-                : isOccupied
-                ? 'bg-indigo-500/20 text-indigo-300'
-                : 'bg-emerald-500/20 text-emerald-400'
-            }`}
-          >
-            <Monitor size={14} />
-          </div>
-          <div className="overflow-hidden">
-            <p className={`text-[11px] font-medium truncate ${isDimmed ? 'text-slate-500' : 'text-slate-300'}`}>
-              {isOccupied ? station.user : isIssueReported ? 'Issue Reported' : isRepair ? 'Under Repair' : 'Ready'}
-            </p>
-            <p className="text-[10px] text-slate-500 font-mono truncate">{station.ip}</p>
-          </div>
-        </div>
-
-        {/* Status Badge */}
-        <div className="mt-2 pt-2 border-t border-slate-800/60 flex items-center justify-between">
-          {getStatusBadge(station.status)}
-          {!isDimmed && (
-            <span className="text-[10px] text-indigo-400 font-medium opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
-              Select
-              <ArrowUpRight size={10} />
-            </span>
-          )}
-        </div>
-
-        {/* Warning tag for issue reported / repair */}
-        {station.activeIssue && (
-          <div
-            className={`mt-1.5 p-1 rounded border flex items-center gap-1 ${
-              isDimmed
-                ? 'bg-slate-900/30 border-slate-800/40 text-slate-500'
-                : isIssueReported
-                ? 'bg-amber-500/10 border-amber-500/20 text-amber-300'
-                : 'bg-rose-500/10 border-rose-500/20 text-rose-300'
-            }`}
-          >
-            <AlertTriangle
-              size={10}
-              className={
-                isDimmed
-                  ? 'text-slate-500 flex-shrink-0'
-                  : isIssueReported
-                  ? 'text-amber-400 flex-shrink-0'
-                  : 'text-rose-400 flex-shrink-0'
-              }
-            />
-            <span className="text-[10px] truncate">{station.activeIssue}</span>
-          </div>
-        )}
-      </div>
-    );
-  };
-
   return (
     <div className="glass rounded-2xl p-5 border border-slate-800/80">
       {/* Header & Controls */}
@@ -526,7 +390,7 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
               type="button"
               onClick={() => setLayoutEditorOpen(true)}
               disabled={attentionOpen}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800/90 border border-slate-700 text-slate-300 hover:text-white hover:border-indigo-500/60 disabled:opacity-40 disabled:pointer-events-none transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800/90 border border-slate-700 text-slate-300 hover:text-slate-50 hover:border-indigo-500/60 disabled:opacity-40 disabled:pointer-events-none transition-all"
               title={`Arrange how the PCs in ${selectedLab} are laid out`}
               aria-label={`Edit layout of ${selectedLab}`}
             >
@@ -578,8 +442,8 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
                   <ArrowUpRight size={11} />
                 </button>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                {group.stations.map((station) => renderStationCard(group.lab, station, 'ALL'))}
+              <div className="flex flex-wrap gap-2" style={{ '--seat-w': '128px' } as React.CSSProperties}>
+                {group.stations.map((station) => renderSeat(group.lab, station, 'ALL'))}
               </div>
             </section>
           ))}
@@ -590,6 +454,7 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 my-4">
             <button
               onClick={() => setStatusFilter('ALL')}
+              data-kpi={statusFilter === 'ALL' ? undefined : 'ALL'}
               className={`p-2.5 rounded-xl border text-left transition-all duration-200 ${
                 statusFilter === 'ALL'
                   ? 'bg-slate-800 border-indigo-400 text-slate-100 shadow-glow-indigo ring-2 ring-indigo-500/50 scale-[1.02]'
@@ -608,6 +473,7 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
 
             <button
               onClick={() => setStatusFilter('ONLINE')}
+              data-kpi={statusFilter === 'ONLINE' ? undefined : 'ONLINE'}
               className={`p-2.5 rounded-xl border text-left transition-all duration-200 ${
                 statusFilter === 'ONLINE'
                   ? 'bg-emerald-950/70 border-emerald-400 text-emerald-200 shadow-[0_0_20px_rgba(16,185,129,0.35)] ring-2 ring-emerald-500/60 scale-[1.02]'
@@ -624,6 +490,7 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
 
             <button
               onClick={() => setStatusFilter('OCCUPIED')}
+              data-kpi={statusFilter === 'OCCUPIED' ? undefined : 'OCCUPIED'}
               className={`p-2.5 rounded-xl border text-left transition-all duration-200 ${
                 statusFilter === 'OCCUPIED'
                   ? 'bg-indigo-950/70 border-indigo-400 text-indigo-200 shadow-[0_0_20px_rgba(99,102,241,0.35)] ring-2 ring-indigo-500/60 scale-[1.02]'
@@ -640,6 +507,7 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
 
             <button
               onClick={() => setStatusFilter('ISSUE_REPORTED')}
+              data-kpi={statusFilter === 'ISSUE_REPORTED' ? undefined : 'ISSUE_REPORTED'}
               className={`p-2.5 rounded-xl border text-left transition-all duration-200 ${
                 statusFilter === 'ISSUE_REPORTED'
                   ? 'bg-amber-950/70 border-amber-400 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.35)] ring-2 ring-amber-500/60 scale-[1.02]'
@@ -656,6 +524,7 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
 
             <button
               onClick={() => setStatusFilter('UNDER_REPAIR')}
+              data-kpi={statusFilter === 'UNDER_REPAIR' ? undefined : 'UNDER_REPAIR'}
               className={`p-2.5 rounded-xl border text-left transition-all duration-200 ${
                 statusFilter === 'UNDER_REPAIR'
                   ? 'bg-rose-950/70 border-rose-400 text-rose-200 shadow-[0_0_20px_rgba(244,63,94,0.35)] ring-2 ring-rose-500/60 scale-[1.02]'
@@ -671,13 +540,12 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
             </button>
           </div>
 
-          {/* Saved room layout, or the default grid. All PCs stay visible; non-matching ones are dimmed */}
-          {layouts[selectedLab] ? (
-            renderRoomLayout(selectedLab, layouts[selectedLab])
+          {/* Every room is drawn as a room: its saved layout, or the default (two sides, 4 PCs per row).
+              All PCs stay visible; non-matching ones are dimmed */}
+          {layoutsLoaded ? (
+            renderRoomLayout(selectedLab, layouts[selectedLab] || suggestLayout(stations.length))
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-              {stations.map((station) => renderStationCard(selectedLab, station, statusFilter))}
-            </div>
+            <div className="h-40 rounded-xl border border-slate-800/80 bg-slate-950/40 animate-pulse" aria-label="Loading room layout" />
           )}
         </>
       )}

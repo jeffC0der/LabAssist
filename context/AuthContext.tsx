@@ -57,6 +57,10 @@ interface AuthContextValue {
   toggleLoginOtp: (enabled: boolean) => Promise<boolean>;
   requestLoginOtp: (email: string, name?: string) => Promise<void>;
   verifyLoginOtp: (email: string, token: string, password?: string) => Promise<User>;
+  /** Staff sign-in: password plus the code from their authenticator app */
+  signInWithAuthenticator: (email: string, password: string, code: string) => Promise<User>;
+  /** Staff signed in with Google: finish with the authenticator code */
+  verifyStaffSecondFactor: (code: string) => Promise<User>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -182,7 +186,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           // A two-factor account whose session never passed its code is not signed in
           // (the /auth pages are where that code gets entered, so leave those alone)
-          if (userProfile.requireLoginOtp && !onAuthPages) {
+          // (staff always sign in with their authenticator app; students only if they turned on email codes)
+          if ((userProfile.requireLoginOtp || userProfile.role === 'ADMIN' || userProfile.role === 'TECHNICIAN') && !onAuthPages) {
             const check = await fetch('/api/user/profile', { cache: 'no-store' }).catch(() => null);
             const body = check && !check.ok ? await check.json().catch(() => ({})) : {};
             if (body?.code === 'second_factor_required') {
@@ -283,11 +288,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Password sign-in runs on the server (/api/auth/signin), which enforces the lockout and counts
   // failures from real password checks; the returned Supabase session is then installed here.
-  const passwordSignIn = useCallback(async (email: string, password: string, otpCode?: string) => {
+  const passwordSignIn = useCallback(async (email: string, password: string, otpCode?: string, authenticatorCode?: string) => {
     const res = await fetch('/api/auth/signin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email.trim().toLowerCase(), password, ...(otpCode ? { otpCode } : {}) }),
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+        password,
+        ...(otpCode ? { otpCode } : {}),
+        ...(authenticatorCode ? { authenticatorCode } : {}),
+      }),
     });
     const data = await res.json().catch(() => ({}));
 
@@ -297,6 +307,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const err: any = new Error(data.error || 'Enter the verification code sent to your email.');
         err.otpRequired = true;
         err.codeSent = !!data.codeSent;
+        throw err;
+      }
+      if (data.code === 'authenticator_required' || data.code === 'authenticator_setup') {
+        // Password was correct; staff finish with their authenticator app (first time: link it)
+        const err: any = new Error('Enter the code from your authenticator app.');
+        err.authenticatorRequired = true;
+        if (data.code === 'authenticator_setup') err.authenticatorSetup = { secret: data.secret, otpauthUri: data.otpauthUri };
+        throw err;
+      }
+      if (data.code === 'invalid_authenticator_code') {
+        const err: any = new Error(data.error || 'Incorrect or expired code.');
+        err.attemptsLeft = data.attemptsLeft;
         throw err;
       }
       if (data.code === 'locked') {
@@ -908,6 +930,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [fetchUserProfile, passwordSignIn]);
 
+  const signInWithAuthenticator = useCallback(async (email: string, password: string, code: string): Promise<User> => {
+    setIsLoading(true);
+    try {
+      const authUser = await passwordSignIn(email, password, undefined, code.trim());
+      const profile = await fetchUserProfile(authUser);
+      saveUserSession(profile);
+      return profile;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [passwordSignIn, fetchUserProfile]);
+
+  const verifyStaffSecondFactor = useCallback(async (code: string): Promise<User> => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/auth/second-factor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        const err: any = new Error(
+          data.code === 'locked' ? 'Too many wrong codes. Your account is temporarily locked.' : data.error || 'Incorrect or expired code.'
+        );
+        err.isLocked = data.code === 'locked';
+        throw err;
+      }
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) throw new Error('Your session has expired. Please sign in again.');
+      const profile = await fetchUserProfile(currentUser);
+      saveUserSession(profile);
+      return profile;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fetchUserProfile]);
+
   const signOut = useCallback(async () => {
     try {
       // 'local' ends this browser's session only (the default would also sign out other devices)
@@ -949,6 +1009,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         toggleLoginOtp,
         requestLoginOtp,
         verifyLoginOtp,
+        signInWithAuthenticator,
+        verifyStaffSecondFactor,
       }}
     >
       {children}

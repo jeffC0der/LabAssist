@@ -13,12 +13,14 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import GoogleButton from './GoogleButton';
 import PasswordStrengthMeter from './PasswordStrengthMeter';
 import OtpInput from './OtpInput';
+import AuthenticatorQr from './AuthenticatorQr';
 
 export type AuthView =
   | 'signin'
   | 'signup'
   | 'verify_signup_otp'
   | 'verify_login_otp'
+  | 'verify_authenticator'
   | 'forgot_email'
   | 'forgot_otp'
   | 'forgot_new_password'
@@ -59,6 +61,7 @@ export default function AuthCard() {
     completeGoogleSignupWithPassword,
     requestLoginOtp,
     verifyLoginOtp,
+    signInWithAuthenticator,
     isLoading,
   } = useAuth();
   const toast = useToast();
@@ -84,6 +87,8 @@ export default function AuthCard() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [otpToken, setOtpToken] = useState('');
+  // Staff sign-in: QR details when the authenticator app still has to be linked (first sign-in)
+  const [authenticatorSetup, setAuthenticatorSetup] = useState<{ secret: string; otpauthUri: string } | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
 
@@ -228,6 +233,14 @@ export default function AuthCard() {
         router.push('/student');
       }
     } catch (err: any) {
+      if (err?.authenticatorRequired) {
+        // Correct password on a staff account: finish with the authenticator app (link it the first time)
+        setAttemptsRemaining(null);
+        setOtpToken('');
+        setAuthenticatorSetup(err.authenticatorSetup || null);
+        setView('verify_authenticator');
+        return;
+      }
       if (err?.otpRequired) {
         // Correct password on a two-factor account: ask for the emailed code
         setAttemptsRemaining(null);
@@ -276,6 +289,32 @@ export default function AuthCard() {
       const msg = err?.message || 'Invalid or expired login code. Please try again.';
       setAuthError(msg);
       toast.error('Verification failed', msg);
+    }
+  };
+
+  // ── 1b-2. Staff: verify the authenticator app code ─────────────────────────────
+  const handleVerifyAuthenticatorSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpOk || isLoading) return;
+    resetErrors();
+    const cleanEmail = email.trim().toLowerCase();
+    try {
+      const loggedInUser = await signInWithAuthenticator(cleanEmail, password, otpToken);
+      setAuthenticatorSetup(null);
+      setAttemptsRemaining(null);
+      toast.success(authenticatorSetup ? 'Authenticator linked' : 'Verified & Signed In!', `Welcome back, ${loggedInUser.name || cleanEmail}!`);
+      router.push(loggedInUser.role === 'ADMIN' ? '/admin' : loggedInUser.role === 'TECHNICIAN' ? '/technician' : '/student');
+    } catch (err: any) {
+      setOtpToken('');
+      if (err?.isLocked) {
+        setIsLocked(true);
+        setLockSecondsRemaining(err.remainingSeconds || 900);
+        setAttemptsRemaining(0);
+        setView('signin');
+      }
+      const msg = err?.message || 'Incorrect or expired code.';
+      setAuthError(msg);
+      toast.error(err?.isLocked ? 'Account Temporarily Locked' : 'Code not accepted', msg);
     }
   };
 
@@ -1014,6 +1053,83 @@ export default function AuthCard() {
             <button
               type="button"
               onClick={() => handleSwitchView('signin')}
+              className="flex items-center gap-1.5 text-slate-500 hover:text-slate-300 transition-colors pt-1"
+            >
+              <ArrowLeft size={13} />
+              <span>Back to Password Sign In</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* VIEW: STAFF AUTHENTICATOR APP (technicians & admins)                      */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {view === 'verify_authenticator' && (
+        <div className="space-y-5 animate-fade-in">
+          <div className="text-center space-y-1.5">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-300 mx-auto mb-2 shadow-[0_0_15px_rgba(99,102,241,0.3)]">
+              <ShieldCheck size={24} />
+            </div>
+            <h2 className="text-lg font-bold text-slate-100">
+              {authenticatorSetup ? 'Link Your Authenticator App' : 'Authenticator Code'}
+            </h2>
+            <p className="text-xs text-slate-400 max-w-xs mx-auto">
+              {authenticatorSetup
+                ? 'Staff accounts sign in with Google Authenticator. Link it once, then use its code every time you sign in.'
+                : 'Open Google Authenticator and enter the current code for UMak LabAssist. It changes every 30 seconds.'}
+            </p>
+          </div>
+
+          {authenticatorSetup && <AuthenticatorQr secret={authenticatorSetup.secret} otpauthUri={authenticatorSetup.otpauthUri} />}
+
+          <form onSubmit={handleVerifyAuthenticatorSubmit} className="space-y-4" noValidate>
+            <div>
+              <label htmlFor="auth-app-0" className="block text-xs font-semibold text-slate-400 mb-2 text-center">
+                6-Digit Code from Your Authenticator App
+              </label>
+              <OtpInput
+                value={otpToken}
+                onChange={val => {
+                  setOtpToken(val);
+                  resetErrors();
+                }}
+                hasError={!!authError}
+                disabled={isLoading}
+                autoFocus={!authenticatorSetup}
+                idPrefix="auth-app"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={!otpOk || isLoading}
+              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(99,102,241,0.3)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? (
+                <>
+                  <LoadingSpinner size={16} className="text-white" />
+                  <span>Verifying &amp; Signing In…</span>
+                </>
+              ) : (
+                <>
+                  <Check size={16} />
+                  <span>{authenticatorSetup ? 'Link App & Sign In' : 'Verify & Enter Dashboard'}</span>
+                </>
+              )}
+            </button>
+          </form>
+
+          <div className="pt-1 flex flex-col items-center gap-2 text-xs">
+            <p className="text-slate-500 text-center max-w-xs">
+              Lost or replaced your phone? Ask an administrator to reset your authenticator.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthenticatorSetup(null);
+                handleSwitchView('signin');
+              }}
               className="flex items-center gap-1.5 text-slate-500 hover:text-slate-300 transition-colors pt-1"
             >
               <ArrowLeft size={13} />

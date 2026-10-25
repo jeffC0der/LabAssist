@@ -35,7 +35,7 @@ export default function StudentPage() {
 
   return (
     <main className="min-h-screen bg-base pb-12" id="student-portal-main">
-      <a href="#student-portal-main" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:bg-cyan-500 focus:text-white focus:rounded-lg">
+      <a href="#student-portal-main" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:bg-cyan-500 focus:text-slate-50 focus:rounded-lg">
         Skip to student portal
       </a>
 

@@ -109,7 +109,7 @@ export default function AdminConsole() {
                     <div className="min-w-0">
                       <span
                         className={`block text-xs font-bold whitespace-nowrap lg:whitespace-normal ${
-                          isActive ? 'text-white' : 'text-slate-200'
+                          isActive ? 'text-slate-50' : 'text-slate-200'
                         }`}
                       >
                         {tab.label}

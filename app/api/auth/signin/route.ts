@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { checkLockout, recordFailedAttempt, resetLockout, markEmailNotified } from '@/lib/lockoutStore';
 import { dispatchBrevoLockoutEmail } from '@/lib/lockoutEmail';
 import { getServiceClient, requiresLoginOtp, sessionIdFromToken, markSessionVerified } from '@/lib/serverAuth';
+import { getAuthenticatorStatus, getOrCreatePendingSetup, verifyStaffCode, isMissingAuthenticatorTable } from '@/lib/staffAuthenticator';
 import { verifyAndConsumeOtp } from '@/lib/otpStore';
 import { issueAndSendOtp } from '@/lib/otpEmail';
 import { readJson, reqEmail, optStr, PATTERNS, ValidationError, errorResponse } from '@/lib/validation';
@@ -12,14 +13,19 @@ const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PU
 
 /**
  * POST /api/auth/signin
- * Body: { email: string, password: string, otpCode?: string }
+ * Body: { email: string, password: string, otpCode?: string, authenticatorCode?: string }
  *
  * Password sign-in performed on the server so login lockouts are based on real password checks:
  * the server enforces the lock, counts the failure itself, and only then returns a Supabase
  * session ({ access_token, refresh_token }) that the browser installs with supabase.auth.setSession().
+ *
+ * Second factor before the session is handed over:
+ *   • technicians/admins: the code from their authenticator app (first sign-in links the app: the
+ *     response carries the QR details, code 'authenticator_setup')
+ *   • students who turned on two-factor login: an emailed code
  */
 export async function POST(request: Request) {
-  let email: string, password: string, otpCode: string;
+  let email: string, password: string, otpCode: string, authenticatorCode: string;
   try {
     const body = await readJson(request, 10_000);
     email = reqEmail(body.email);
@@ -28,6 +34,7 @@ export async function POST(request: Request) {
     }
     password = body.password;
     otpCode = optStr(body.otpCode, 'Verification code', { max: 6, pattern: PATTERNS.sixDigits, patternMessage: 'Enter the 6-digit code.' }) || '';
+    authenticatorCode = optStr(body.authenticatorCode, 'Authenticator code', { max: 6, pattern: PATTERNS.sixDigits, patternMessage: 'Enter the 6-digit code from your authenticator app.' }) || '';
   } catch (err) {
     return errorResponse(err, 'auth/signin');
   }
@@ -101,11 +108,68 @@ export async function POST(request: Request) {
       );
     }
 
-    // 3. Correct password clears the failure count
-    await resetLockout(email);
+    // 4a. Staff: the session is only handed over together with a valid authenticator app code
+    const supabaseAdmin = getServiceClient();
+    const { data: profile } = supabaseAdmin
+      ? await supabaseAdmin.from('profiles').select('role').eq('id', data.user.id).maybeSingle()
+      : { data: null };
+    const isStaff = profile?.role === 'TECHNICIAN' || profile?.role === 'ADMIN';
 
-    // 4. Two-factor accounts: the session is only handed over together with a valid emailed code
-    if (requiresLoginOtp(data.user)) {
+    if (isStaff) {
+      try {
+        if (!authenticatorCode) {
+          await authClient.auth.signOut({ scope: 'local' });
+          const status = await getAuthenticatorStatus(data.user.id);
+          if (status === 'ACTIVE') {
+            return NextResponse.json({ success: false, code: 'authenticator_required' });
+          }
+          // First staff sign-in: link the app now (the correct password was just proven)
+          const setup = await getOrCreatePendingSetup(data.user.id, email);
+          return NextResponse.json(
+            { success: false, code: 'authenticator_setup', secret: setup?.secret, otpauthUri: setup?.otpauthUri },
+            { headers: { 'Cache-Control': 'no-store' } }
+          );
+        }
+
+        const result = await verifyStaffCode(data.user.id, authenticatorCode);
+        if (result !== 'ok') {
+          await authClient.auth.signOut({ scope: 'local' });
+          const failure = await recordFailedAttempt(email);
+          if (failure.isLocked) return NextResponse.json({ success: false, code: 'locked', ...failure }, { status: 423 });
+          return NextResponse.json(
+            {
+              success: false,
+              code: 'invalid_authenticator_code',
+              error: `Incorrect or expired code. Enter the current code from your authenticator app (${failure.attemptsLeft} attempt${failure.attemptsLeft === 1 ? '' : 's'} left).`,
+              attemptsLeft: failure.attemptsLeft,
+            },
+            { status: 401 }
+          );
+        }
+      } catch (err) {
+        if (isMissingAuthenticatorTable(err)) {
+          return NextResponse.json(
+            { success: false, error: 'Staff sign-in needs the authenticator table. Run supabase_staff_authenticator.sql in Supabase.' },
+            { status: 500 }
+          );
+        }
+        throw err;
+      }
+
+      await resetLockout(email);
+      const sessionId = sessionIdFromToken(data.session.access_token);
+      if (!sessionId) {
+        return NextResponse.json({ success: false, error: 'Could not start a verified session.' }, { status: 500 });
+      }
+      await markSessionVerified(sessionId, data.user.id);
+    }
+
+    // 3. Correct password clears the failure count (staff: only once their authenticator code passed, above,
+    //    so knowing the password alone can't reset the counter between code guesses)
+    if (!isStaff) await resetLockout(email);
+
+    // 4b. Students with two-factor login: the session is only handed over together with a valid emailed code
+    if (!isStaff && requiresLoginOtp(data.user)) {
       if (!otpCode) {
         // Discard this session and email a login code
         await authClient.auth.signOut({ scope: 'local' });

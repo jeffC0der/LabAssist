@@ -9,7 +9,7 @@ export interface CredentialLogEntry {
   id: string;
   userName: string | null;
   userRole: string | null;
-  action: 'REVEAL' | 'SET' | 'CLEAR';
+  action: 'REVEAL' | 'SET' | 'CLEAR' | 'AUTH_SETUP' | 'AUTH_RESET';
   scope: 'PC' | 'ROOM' | 'ALL';
   labCode: string | null;
   pcNum: string | null;

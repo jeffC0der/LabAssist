@@ -1,9 +1,11 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { KeyRound, Eye, EyeOff, Copy, X, ShieldAlert } from 'lucide-react';
+import { KeyRound, Eye, EyeOff, Copy, X, ShieldAlert, Smartphone } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import ModalPortal from '@/components/shared/ModalPortal';
 import type { RevealedCredential } from '@/app/api/pc-credentials/reveal/route';
+import type { AuthenticatorStatus } from '@/app/api/pc-credentials/authenticator/route';
+import AuthenticatorSetup from '@/components/dashboard/AuthenticatorSetup';
 
 /** What to reveal. A single PC can be identified by its id or by room + PC number (e.g. from a ticket). */
 export type RevealTarget =
@@ -21,14 +23,16 @@ interface CredentialRevealDialogProps {
 }
 
 /**
- * Reveal window for PC admin credentials. Every reveal requires a reason and the user's own password;
+ * Reveal window for PC admin credentials. Every reveal requires a reason and the current 6-digit code from
+ * the user's authenticator app (Google Authenticator; linked once, right here, the first time);
  * the server rate-limits, logs it and notifies the admins. Revealed credentials auto-hide.
  */
 export default function CredentialRevealDialog({ target, defaultReason = '', onClose, onRevealed }: CredentialRevealDialogProps) {
   const toast = useToast();
   const [reason, setReason] = useState(defaultReason);
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [code, setCode] = useState('');
+  // Whether this user has linked an authenticator app (checked each time the dialog opens)
+  const [authStatus, setAuthStatus] = useState<AuthenticatorStatus | 'LOADING'>('LOADING');
   const [isRevealing, setIsRevealing] = useState(false);
   const [revealed, setRevealed] = useState<RevealedCredential[] | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
@@ -40,8 +44,14 @@ export default function CredentialRevealDialog({ target, defaultReason = '', onC
   const targetKey = target ? JSON.stringify(target) : '';
   useEffect(() => {
     setReason(defaultReason);
-    setPassword('');
-    setShowPassword(false);
+    setCode('');
+    if (target) {
+      setAuthStatus('LOADING');
+      fetch('/api/pc-credentials/authenticator', { cache: 'no-store' })
+        .then((r) => r.json())
+        .then((d) => setAuthStatus(d.status === 'ACTIVE' ? 'ACTIVE' : d.status === 'PENDING' ? 'PENDING' : 'NONE'))
+        .catch(() => setAuthStatus('NONE'));
+    }
     setRevealed(null);
     setSecondsLeft(0);
     setUnmasked({});
@@ -50,7 +60,7 @@ export default function CredentialRevealDialog({ target, defaultReason = '', onC
 
   const close = () => {
     setRevealed(null);
-    setPassword('');
+    setCode('');
     setUnmasked({});
     onClose();
   };
@@ -82,12 +92,16 @@ export default function CredentialRevealDialog({ target, defaultReason = '', onC
           labCode: target.scope === 'PC' || target.scope === 'ROOM' ? target.labCode : undefined,
           pcNum: target.scope === 'PC' ? target.pcNum : undefined,
           reason: reason.trim(),
-          password,
+          code,
         }),
       });
       const data = await res.json().catch(() => ({}));
-      setPassword('');
+      setCode('');
       if (!res.ok) {
+        if (data.code === 'authenticator_required') {
+          setAuthStatus('NONE');
+          return;
+        }
         toast.error('Could not reveal credentials', data.error || 'Please try again.');
         return;
       }
@@ -132,12 +146,16 @@ export default function CredentialRevealDialog({ target, defaultReason = '', onC
                 This view is logged and the admins are notified.
               </p>
             </div>
-            <button type="button" onClick={close} className="p-1 text-slate-400 hover:text-white" aria-label="Close">
+            <button type="button" onClick={close} className="p-1 text-slate-400 hover:text-slate-50" aria-label="Close">
               <X size={18} />
             </button>
           </div>
 
-          {!revealed ? (
+          {!revealed && authStatus === 'LOADING' ? (
+            <p className="py-6 text-center text-slate-400">Checking your authenticator…</p>
+          ) : !revealed && authStatus !== 'ACTIVE' ? (
+            <AuthenticatorSetup onLinked={() => setAuthStatus('ACTIVE')} onCancel={close} />
+          ) : !revealed ? (
             <form onSubmit={handleReveal} className="space-y-3">
               <div className="space-y-1.5">
                 <label htmlFor="reveal-reason" className="block font-semibold text-slate-300">Reason</label>
@@ -153,28 +171,25 @@ export default function CredentialRevealDialog({ target, defaultReason = '', onC
                 />
               </div>
               <div className="space-y-1.5">
-                <label htmlFor="reveal-password" className="block font-semibold text-slate-300">Your password</label>
+                <label htmlFor="reveal-code" className="block font-semibold text-slate-300">
+                  Authenticator code
+                </label>
                 <div className="relative">
+                  <Smartphone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                   <input
-                    id="reveal-password"
-                    type={showPassword ? 'text' : 'password'}
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Re-enter your account password"
-                    className="w-full pl-3 pr-9 py-2 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 focus:border-rose-400 focus:outline-none"
+                    id="reveal-code"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="6-digit code"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-800 text-slate-100 border border-slate-700 focus:border-rose-400 focus:outline-none font-mono text-base tracking-[0.4em]"
                     autoFocus={!!defaultReason}
                   />
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
                 </div>
+                <p className="text-[11px] text-slate-500">Open Google Authenticator and enter the current code for UMak LabAssist. It changes every 30 seconds.</p>
               </div>
               <div className="pt-1 flex justify-end gap-2">
                 <button type="button" onClick={close} className="py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold">
@@ -182,7 +197,7 @@ export default function CredentialRevealDialog({ target, defaultReason = '', onC
                 </button>
                 <button
                   type="submit"
-                  disabled={isRevealing || reason.trim().length < 3 || !password}
+                  disabled={isRevealing || reason.trim().length < 3 || code.length !== 6}
                   className="py-2 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold disabled:opacity-40"
                 >
                   {isRevealing ? 'Checking…' : 'Reveal'}
@@ -202,13 +217,13 @@ export default function CredentialRevealDialog({ target, defaultReason = '', onC
                         <button
                           type="button"
                           onClick={() => setUnmasked(allShown ? {} : Object.fromEntries(withPassword.map((k) => [k, true])))}
-                          className="inline-flex items-center gap-1 font-semibold hover:text-white"
+                          className="inline-flex items-center gap-1 font-semibold hover:text-slate-50"
                         >
                           {allShown ? <EyeOff size={13} /> : <Eye size={13} />}
                           {allShown ? 'Hide all passwords' : 'Show all passwords'}
                         </button>
                       )}
-                      <button type="button" onClick={close} className="font-semibold hover:text-white">Hide now</button>
+                      <button type="button" onClick={close} className="font-semibold hover:text-slate-50">Hide now</button>
                     </div>
                   </div>
                 );

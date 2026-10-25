@@ -49,6 +49,7 @@ import { useToast } from '@/context/ToastContext';
 import { useRepairs, DeviceRepair, RepairStatus } from '@/context/RepairContext';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import ModalPortal from '@/components/shared/ModalPortal';
+import { printReceipt } from '@/lib/printReceipt';
 
 const LAB_ROOM_OPTIONS = [
   { code: 'LAB-101', name: 'Embedded Systems & IoT Lab (1st Floor)' },
@@ -2646,7 +2647,7 @@ export default function TechnicianRepairsWorkbench() {
       {invoiceViewData && (
         <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
-          <div className="w-full max-w-2xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/40 shadow-2xl p-6 sm:p-8 space-y-6 text-slate-200">
+          <div data-print-root className="w-full max-w-2xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/40 shadow-2xl p-6 sm:p-8 space-y-6 text-slate-200">
             {/* Invoice Top Header */}
             <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-4 border-b border-slate-800">
               <div>
@@ -2784,11 +2785,11 @@ export default function TechnicianRepairsWorkbench() {
             <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
               <button
                 type="button"
-                onClick={() => window.print()}
+                onClick={(e) => printReceipt(e.currentTarget, "Repair Invoice")}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold flex items-center gap-1.5 transition-all"
               >
                 <Printer size={14} />
-                <span>Print Invoice</span>
+                <span>Print / Save PDF</span>
               </button>
 
               <button
@@ -3185,7 +3186,7 @@ export default function TechnicianRepairsWorkbench() {
       {finalReceiptData && (
         <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
-          <div className="w-full max-w-3xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/50 shadow-2xl p-6 sm:p-8 space-y-6">
+          <div data-print-root className="w-full max-w-3xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/50 shadow-2xl p-6 sm:p-8 space-y-6">
             {/* Header / Brand */}
             <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-5 border-b border-slate-800">
               <div className="space-y-1">
@@ -3210,11 +3211,11 @@ export default function TechnicianRepairsWorkbench() {
               <div className="flex items-center gap-2 self-end sm:self-start">
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={(e) => printReceipt(e.currentTarget, "Release Receipt")}
                   className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm"
                 >
                   <Printer size={13} className="text-emerald-400" />
-                  <span>Print Receipt</span>
+                  <span>Print / Save PDF</span>
                 </button>
                 <button
                   type="button"
@@ -3354,11 +3355,11 @@ export default function TechnicianRepairsWorkbench() {
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
               <button
                 type="button"
-                onClick={() => window.print()}
+                onClick={(e) => printReceipt(e.currentTarget, "Release Receipt")}
                 className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5"
               >
                 <Printer size={13} className="text-emerald-400" />
-                <span>Print Official Copy</span>
+                <span>Print / Save PDF</span>
               </button>
               <button
                 type="button"

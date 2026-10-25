@@ -92,7 +92,7 @@ export default function TechnicianPage() {
     <main className="min-h-screen bg-base pb-12" id="technician-portal-main">
       <a
         href="#technician-portal-main"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:bg-indigo-500 focus:text-white focus:rounded-lg"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:bg-indigo-500 focus:text-slate-50 focus:rounded-lg"
       >
         Skip to technician dashboard
       </a>
@@ -162,7 +162,7 @@ export default function TechnicianPage() {
                       <div className="min-w-0">
                         <span
                           className={`block text-xs font-bold whitespace-nowrap lg:whitespace-normal ${
-                            isActive ? 'text-white' : 'text-slate-200'
+                            isActive ? 'text-slate-50' : 'text-slate-200'
                           }`}
                         >
                           {tab.label}

@@ -39,6 +39,13 @@ export default function AuthCallbackPage() {
           return;
         }
 
+        // Technicians and admins always finish signing in with their authenticator app
+        if (profileRow?.role === 'ADMIN' || profileRow?.role === 'TECHNICIAN') {
+          setStatusMsg('Staff account — authenticator code required…');
+          router.replace('/auth/verify-authenticator');
+          return;
+        }
+
         // If user has Login OTP (2FA) enabled
         if (user.app_metadata?.require_login_otp === true) {
           setStatusMsg('Two-factor verification enabled — sending login code…');

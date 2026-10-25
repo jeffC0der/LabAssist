@@ -228,7 +228,7 @@ export default function StudentPortal() {
                       <div
                         className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
                           isActive
-                            ? 'bg-slate-950/60 text-white shadow-inner'
+                            ? 'bg-slate-950/60 text-slate-50 shadow-inner'
                             : 'bg-slate-800/70 text-slate-400 group-hover:text-slate-200'
                         }`}
                       >
@@ -236,7 +236,7 @@ export default function StudentPortal() {
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className={`text-sm font-bold truncate ${isActive ? 'text-white' : 'text-slate-200'}`}>
+                          <span className={`text-sm font-bold truncate ${isActive ? 'text-slate-50' : 'text-slate-200'}`}>
                             {tab.label}
                           </span>
                         </div>

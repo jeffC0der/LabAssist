@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import './theme-colors.css';
 import './globals.css';
 import { ToastProvider } from '@/context/ToastContext';
 import { AuthProvider } from '@/context/AuthContext';
@@ -10,6 +11,7 @@ import { NotificationProvider } from '@/context/NotificationContext';
 import { RoleProvider } from '@/context/RoleContext';
 import { ToastContainer } from '@/components/shared/Toast';
 import SessionGuard from '@/components/auth/SessionGuard';
+import { THEME_INIT_SCRIPT } from '@/lib/theme';
 
 export const metadata: Metadata = {
   title: 'LabAssist — Campus Lab Maintenance Platform',
@@ -29,8 +31,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark" suppressHydrationWarning>
       <head>
+        {/* Apply the saved Dark/Light theme before the first paint */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link

@@ -565,7 +565,7 @@ export default function UserAccessControl() {
                   <p className="text-xs text-slate-400">Single-use onboarding key for field IT personnel</p>
                 </div>
               </div>
-              <button type="button" onClick={() => setIsPasscodeModalOpen(false)} className="text-slate-400 hover:text-white p-1">
+              <button type="button" onClick={() => setIsPasscodeModalOpen(false)} className="text-slate-400 hover:text-slate-50 p-1">
                 <X size={18} />
               </button>
             </div>

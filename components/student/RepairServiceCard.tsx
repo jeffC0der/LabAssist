@@ -47,6 +47,7 @@ import { useRepairs, DeviceRepair, RepairStatus } from '@/context/RepairContext'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { REPAIR_FIELD_LIMITS } from '@/lib/repairLimits';
 import ModalPortal from '@/components/shared/ModalPortal';
+import { printReceipt } from '@/lib/printReceipt';
 
 export interface RepairIntakeRequest {
   id: string;
@@ -1352,7 +1353,7 @@ export default function RepairServiceCard() {
       {customerInvoiceModalTarget && (
         <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
-          <div className="w-full max-w-2xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/40 shadow-2xl p-6 sm:p-7 space-y-5">
+          <div data-print-root className="w-full max-w-2xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/40 shadow-2xl p-6 sm:p-7 space-y-5">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
@@ -1445,8 +1446,17 @@ export default function RepairServiceCard() {
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
               <button
                 type="button"
+                onClick={(e) => printReceipt(e.currentTarget, `Invoice ${customerInvoiceModalTarget.id}`)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5"
+                title="Print, or choose Save as PDF in the print window"
+              >
+                <Printer size={13} className="text-emerald-400" />
+                <span>Print / Save PDF</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setCustomerInvoiceModalTarget(null)}
-                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700"
+                className="px-5 py-2 rounded-xl text-xs font-bold text-slate-50 bg-slate-800 hover:bg-slate-700 border border-slate-700"
               >
                 Close
               </button>
@@ -1460,7 +1470,7 @@ export default function RepairServiceCard() {
       {customerReceiptModalTarget && (
         <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
-          <div className="w-full max-w-2xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/50 shadow-2xl p-6 sm:p-7 space-y-5">
+          <div data-print-root className="w-full max-w-2xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/50 shadow-2xl p-6 sm:p-7 space-y-5">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
@@ -1476,11 +1486,11 @@ export default function RepairServiceCard() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={(e) => printReceipt(e.currentTarget, "Release Receipt")}
                   className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm"
                 >
                   <Printer size={13} className="text-emerald-400" />
-                  <span>Print</span>
+                  <span>Print / Save PDF</span>
                 </button>
                 <button
                   type="button"
