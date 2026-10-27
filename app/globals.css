@@ -381,6 +381,19 @@ select:not([multiple]):not([size]):not(.appearance-none) {
 @container (min-width: 120px) {
   .seat-extra { display: block; }
 }
+/* Small tiles (a full room on a phone): only the PC number, colored by status, in a square */
+.seat-num { display: none; }
+@container (max-width: 63px) {
+  .seat-body { display: none; }
+  .seat-num {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    font-size: clamp(10px, 36cqw, 14px);
+    line-height: 1;
+  }
+}
 
 /* ═══════════════════ Light mode ═══════════════════
    Colors flip through theme-colors.css; these cover the hand-written dark surfaces above and the few

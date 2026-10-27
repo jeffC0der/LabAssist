@@ -122,6 +122,21 @@ export default function AuthCallbackPage() {
       const urlParams = new URLSearchParams(window.location.search);
       const returnedState = urlParams.get('state');
       if (returnedState) {
+        // One use per sign-in, on every server instance: the state must match the one this tab
+        // started with, and it is forgotten right away
+        let startedState: string | null | undefined;
+        try {
+          startedState = sessionStorage.getItem('labassist_oauth_state');
+          sessionStorage.removeItem('labassist_oauth_state');
+        } catch {
+          startedState = undefined; // storage blocked: rely on the server check below
+        }
+        if (startedState !== undefined && startedState !== returnedState) {
+          setStatusMsg('Security check failed. Please try signing in again.');
+          try { await supabase.auth.signOut(); } catch {}
+          router.replace('/auth?error=state_invalid');
+          return;
+        }
         try {
           const verifyRes = await fetch('/api/auth/state', {
             method: 'PUT',

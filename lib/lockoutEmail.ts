@@ -53,7 +53,6 @@ export async function dispatchBrevoLockoutEmail(
       (sendResponse.messageIds && sendResponse.messageIds[0]) ||
       undefined;
 
-    console.log(`[lockout] Brevo lockout email sent successfully to ${cleanEmail}, messageId: ${messageId}`);
     return { success: true, messageId };
   } catch (error: any) {
     const errorMessage = error?.body?.message || error?.message || 'Failed to dispatch lockout email via Brevo';

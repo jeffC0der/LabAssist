@@ -28,89 +28,8 @@ function getSupabaseAdmin() {
   });
 }
 
-// ── Seed data for empty tables ──
-const SEED_REPAIRS: any[] = [
-  {
-    rma_number: '01-LP-2026-0928',
-    client_name: 'Marcus Vance',
-    client_email: 'marcus.vance@umak.edu.ph',
-    device_type: 'Laptop',
-    device_model: 'Lenovo Legion 5 15ARH05',
-    serial_number: 'PF2X9Y8Z',
-    os_specs: 'Windows 11 Home | Ryzen 5 7535HS | 16GB RAM | RTX 3050',
-    reported_issue: 'Spilled coffee on keyboard and trackpad; spacebar sticky and no display output on external HDMI port.',
-    inspection_scratches_dents: true,
-    inspection_missing_screws_feet: false,
-    inspection_screen_damage_dead_pixels: false,
-    inspection_liquid_damage_indicators: true,
-    additional_inspection_notes: 'Liquid residue visible near top-right palm rest. OEM 230W power brick included with unit.',
-    status: 'IN_DIAGNOSTICS',
-    priority: 'HIGH',
-    technician_name: 'Tech. Alex Torres',
-    technician_notes: 'Ultrasonic board wash completed for daughterboard. Testing HDMI IC solder pads under microscope.',
-    parts_replaced: 'Keyboard membrane assembly ordered (P/N: 5CB0Z21516)',
-  },
-  {
-    rma_number: '02-PC-2026-0928',
-    client_name: 'Alyssa Gomez',
-    client_email: 'alyssa.gomez@umak.edu.ph',
-    device_type: 'Desktop',
-    device_model: 'Dell OptiPlex 7080 Micro Tower',
-    serial_number: 'DL7080-99X4',
-    os_specs: 'Windows 11 Pro | Intel Core i7-10700 | 32GB RAM | 512GB NVMe SSD',
-    reported_issue: 'Continuous 3 amber + 2 white power LED diagnostic code on boot. Fans spin up then immediately shut down.',
-    inspection_scratches_dents: false,
-    inspection_missing_screws_feet: true,
-    inspection_screen_damage_dead_pixels: false,
-    inspection_liquid_damage_indicators: false,
-    additional_inspection_notes: 'Two rear chassis thumb screws missing. Internal dust buildup in CPU cooler.',
-    status: 'REPAIR_IN_PROGRESS',
-    priority: 'MEDIUM',
-    technician_name: 'Tech. Alex Torres',
-    technician_notes: 'Reseated DIMM slot 2. Re-applied Arctic MX-4 thermal paste. Testing 24hr MemTest86 run.',
-    parts_replaced: 'CMOS CR2032 battery replaced',
-  },
-  {
-    rma_number: '03-LP-2026-0928',
-    client_name: 'Daniel Bautista',
-    client_email: 'daniel.bautista@umak.edu.ph',
-    device_type: 'Laptop',
-    device_model: 'ASUS ROG Zephyrus G14 GA402RJ',
-    serial_number: 'G14-8841Z',
-    os_specs: 'Windows 11 Home | Ryzen 9 6900HS | 16GB DDR5 | Radeon RX 6700S',
-    reported_issue: 'Overheating and thermal throttling under CAD workloads. CPU temps reach 96°C within 3 minutes of rendering.',
-    inspection_scratches_dents: true,
-    inspection_missing_screws_feet: false,
-    inspection_screen_damage_dead_pixels: false,
-    inspection_liquid_damage_indicators: false,
-    additional_inspection_notes: 'Chassis rubber feet intact. Minor scuff on anodized top lid.',
-    status: 'READY_FOR_PICKUP',
-    priority: 'LOW',
-    technician_name: 'Tech. Maria Santos',
-    technician_notes: 'Liquid metal repasted on vapor chamber. Fan intake grills de-dusted. Stress test stable at 78°C under sustained load.',
-    parts_replaced: 'Thermal Grizzly Conductonaut liquid metal',
-  },
-  {
-    rma_number: '04-PC-2026-0928',
-    client_name: 'Kristine Reyes',
-    client_email: 'kristine.reyes@umak.edu.ph',
-    device_type: 'Desktop',
-    device_model: 'Custom Engineering Workstation (Fractal Node 202)',
-    serial_number: 'ENG-LAB-CUST-04',
-    os_specs: 'Ubuntu 22.04 LTS | Ryzen 7 5800X3D | 64GB ECC RAM | RTX 4070',
-    reported_issue: 'GPU PCIe slot sagging caused intermittent PCIe x16 link disconnection, causing kernel panic during CUDA training.',
-    inspection_scratches_dents: false,
-    inspection_missing_screws_feet: false,
-    inspection_screen_damage_dead_pixels: false,
-    inspection_liquid_damage_indicators: false,
-    additional_inspection_notes: 'Custom dual-slot GPU anti-sag bracket requested.',
-    status: 'AWAITING_PARTS',
-    priority: 'HIGH',
-    technician_name: 'Tech. Alex Torres',
-    technician_notes: 'PCIe slot pins inspected with endoscope. Sourcing heavy-duty PCIe riser and CNC aluminum support pillar.',
-    parts_replaced: null,
-  },
-];
+const NO_DATABASE = () =>
+  NextResponse.json({ error: 'Server configuration error: the database is not connected.' }, { status: 500 });
 
 // Convert DB row → frontend/API shape with full workflow attributes.
 // fromDatabase: the row was read from Supabase, so its embedded metadata is authoritative and the
@@ -321,14 +240,7 @@ export async function GET(request: Request) {
   if (auth.response) return auth.response;
 
   const supabase = getSupabaseAdmin();
-  if (!supabase) {
-    return NextResponse.json(
-      {
-        repairs: SEED_REPAIRS.map((r) => rowToRepair(r)),
-      },
-      { headers: NO_CACHE_HEADERS }
-    );
-  }
+  if (!supabase) return NO_DATABASE();
 
   try {
     const { data, error } = await supabase
@@ -341,29 +253,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ repairs: [] }, { headers: NO_CACHE_HEADERS });
     }
 
-    // Auto-seed if empty
-    if (!data || data.length === 0) {
-      try {
-        await supabase.from('device_repairs').insert(SEED_REPAIRS);
-        const { data: seeded } = await supabase
-          .from('device_repairs')
-          .select('*')
-          .order('created_at', { ascending: false });
-        return NextResponse.json(
-          { repairs: (seeded || []).map((r) => rowToRepair(r, true)) },
-          { headers: NO_CACHE_HEADERS }
-        );
-      } catch (seedErr) {
-        console.warn('Failed to seed device_repairs:', seedErr);
-        return NextResponse.json({ repairs: [] }, { headers: NO_CACHE_HEADERS });
-      }
-    }
-
     // Students only receive their own repair records; staff see every job
     const isStaff = STAFF_ROLES.includes(auth.user.role);
     const visibleRows = isStaff
-      ? data
-      : data.filter(
+      ? data || []
+      : (data || []).filter(
           (r) =>
             (r.client_email || '').trim().toLowerCase() === auth.user.email ||
             (r.user_id && r.user_id === auth.user.id)
@@ -385,6 +279,7 @@ export async function POST(request: Request) {
   if (auth.response) return auth.response;
 
   const supabase = getSupabaseAdmin();
+  if (!supabase) return NO_DATABASE();
 
   try {
     const body = await readJson(request);
@@ -469,19 +364,6 @@ export async function POST(request: Request) {
       }
     });
 
-    // Check seed repairs
-    SEED_REPAIRS.forEach((r) => {
-      if (r?.rma_number) {
-        const rmaStr = String(r.rma_number).trim();
-        existingRmas.add(rmaStr.toLowerCase());
-        const match = rmaStr.match(pattern);
-        if (match && match[1]) {
-          const q = parseInt(match[1], 10);
-          if (!isNaN(q) && q > maxQueue) maxQueue = q;
-        }
-      }
-    });
-
     let nextQueue = maxQueue + 1;
     let queueNum = String(nextQueue).padStart(2, '0');
     let jobOrderNo = `${queueNum}-${devCode}-${year}-${monthDate}`;
@@ -533,20 +415,13 @@ export async function POST(request: Request) {
       priority: 'MEDIUM',
     };
 
-    if (supabase) {
-      const { error: insertErr } = await supabase
-        .from('device_repairs')
-        .insert(dbRow);
+    const { error: insertErr } = await supabase
+      .from('device_repairs')
+      .insert(dbRow);
 
-      if (insertErr) {
-        console.error('Supabase device_repairs insert error:', insertErr);
-        return errorResponse(insertErr, 'api/repairs');
-      }
-    } else {
-      SEED_REPAIRS.unshift({
-        ...dbRow,
-        created_at: now.toISOString(),
-      });
+    if (insertErr) {
+      console.error('Supabase device_repairs insert error:', insertErr);
+      return errorResponse(insertErr, 'api/repairs');
     }
 
     // Format Confirmation Date
@@ -610,6 +485,7 @@ export async function PATCH(request: Request) {
   if (auth.response) return auth.response;
 
   const supabase = getSupabaseAdmin();
+  if (!supabase) return NO_DATABASE();
 
   try {
     const body = await readJson(request);
@@ -661,17 +537,11 @@ export async function PATCH(request: Request) {
     }
 
     // ── Pre-fetch existing record to inspect current status & payment conditions ──
-    let existingRecord: any = null;
-    if (supabase) {
-      const { data: rec } = await supabase
-        .from('device_repairs')
-        .select('*')
-        .eq('rma_number', rmaNumber)
-        .maybeSingle();
-      existingRecord = rec;
-    } else {
-      existingRecord = SEED_REPAIRS.find((r: any) => r.rma_number === rmaNumber);
-    }
+    const { data: existingRecord } = await supabase
+      .from('device_repairs')
+      .select('*')
+      .eq('rma_number', rmaNumber)
+      .maybeSingle();
 
     const { cleanNotes, meta: existingDbMeta } = extractWorkflowMetadata(existingRecord?.additional_inspection_notes);
     // With Supabase, the DB metadata is authoritative; the per-instance memory can be stale and
@@ -869,19 +739,6 @@ export async function PATCH(request: Request) {
         console.error('[repairs PATCH] Supabase update failed:', updateErr.message);
         return errorResponse(updateErr, 'api/repairs');
       }
-    } else {
-      const found = SEED_REPAIRS.find((r: any) => r.rma_number === rmaNumber);
-      if (found) {
-        if (status !== undefined) found.status = resolvedStatus;
-        if (technicianNotes !== undefined) found.technician_notes = technicianNotes;
-        if (partsReplaced !== undefined) found.parts_replaced = partsReplaced;
-        if (deviceReleasedTo !== undefined) found.device_released_to = deviceReleasedTo.trim();
-        if (completedAt !== undefined) {
-          found.completed_at = completedAt;
-        } else if (resolvedStatus === 'COMPLETED') {
-          found.completed_at = new Date().toISOString();
-        }
-      }
     }
 
     // ── Dispatch Brevo Ready for Pickup Email Notification ──
@@ -902,7 +759,6 @@ export async function PATCH(request: Request) {
 
           emailDispatched = emailRes.success;
           emailMessageId = emailRes.messageId;
-          console.log(`[Repair PATCH] Ready for pickup email sent to ${resolvedEmail}, success=${emailRes.success}`);
         } catch (emailErr) {
           console.error('[Repair PATCH] Failed to dispatch Ready for Pickup email:', emailErr);
         }
@@ -963,7 +819,6 @@ export async function PATCH(request: Request) {
 
           finalReceiptEmailDispatched = receiptRes.success;
           finalReceiptEmailMessageId = receiptRes.messageId;
-          console.log(`[Repair PATCH] Final receipt email sent to ${resolvedEmail}, success=${receiptRes.success}`);
         } catch (receiptEmailErr) {
           console.error('[Repair PATCH] Failed to dispatch Final Receipt email:', receiptEmailErr);
         }

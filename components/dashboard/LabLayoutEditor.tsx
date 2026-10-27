@@ -94,18 +94,19 @@ export default function LabLayoutEditor({ labCode, stations, current, onClose, o
   return (
     <ModalPortal>
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm"
+        className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-sm"
         onClick={() => !saving && onClose()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="layout-editor-title"
       >
+        {/* Header and footer stay put; only the middle scrolls (nearly full screen on phones) */}
         <div
-          className="w-full max-w-4xl max-h-[92vh] overflow-y-auto bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl"
+          className="w-full max-w-4xl max-h-[calc(100dvh-1rem)] sm:max-h-[92vh] flex flex-col overflow-hidden bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-5 py-4 bg-slate-900 border-b border-slate-800">
+          <div className="flex-shrink-0 flex items-center justify-between gap-3 px-4 sm:px-5 py-3 sm:py-4 bg-slate-900 border-b border-slate-800">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 flex-shrink-0">
                 <LayoutGrid size={16} />
@@ -121,14 +122,14 @@ export default function LabLayoutEditor({ labCode, stations, current, onClose, o
               type="button"
               onClick={onClose}
               disabled={saving}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+              className="p-2 sm:p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 flex-shrink-0"
               aria-label="Close layout editor"
             >
               <X size={16} />
             </button>
           </div>
 
-          <div className="p-5 space-y-5">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-5 space-y-5">
             {/* Room settings */}
             <div className="grid gap-3 sm:grid-cols-3">
               <div>
@@ -222,7 +223,7 @@ export default function LabLayoutEditor({ labCode, stations, current, onClose, o
                           type="button"
                           onClick={() => changeRow(side, i, -1)}
                           disabled={count <= 1}
-                          className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 disabled:opacity-30 flex items-center justify-center"
+                          className="w-9 h-9 sm:w-7 sm:h-7 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 disabled:opacity-30 flex items-center justify-center"
                           aria-label={`Fewer PCs in ${side} row ${i + 1}`}
                         >
                           <Minus size={12} />
@@ -232,7 +233,7 @@ export default function LabLayoutEditor({ labCode, stations, current, onClose, o
                           type="button"
                           onClick={() => changeRow(side, i, 1)}
                           disabled={count >= MAX_PER_ROW}
-                          className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 disabled:opacity-30 flex items-center justify-center"
+                          className="w-9 h-9 sm:w-7 sm:h-7 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 disabled:opacity-30 flex items-center justify-center"
                           aria-label={`More PCs in ${side} row ${i + 1}`}
                         >
                           <Plus size={12} />
@@ -241,7 +242,7 @@ export default function LabLayoutEditor({ labCode, stations, current, onClose, o
                         <button
                           type="button"
                           onClick={() => removeRow(side, i)}
-                          className="ml-auto p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10"
+                          className="ml-auto p-2.5 sm:p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10"
                           aria-label={`Remove ${side} row ${i + 1}`}
                         >
                           <Trash2 size={13} />
@@ -253,7 +254,7 @@ export default function LabLayoutEditor({ labCode, stations, current, onClose, o
                     type="button"
                     onClick={() => addRow(side)}
                     disabled={layout[side].length >= MAX_ROWS}
-                    className="mt-2 w-full py-1.5 rounded-lg border border-dashed border-slate-600 text-xs text-slate-400 hover:text-slate-200 hover:border-slate-500 disabled:opacity-30"
+                    className="mt-2 w-full py-2.5 sm:py-1.5 rounded-lg border border-dashed border-slate-600 text-xs text-slate-400 hover:text-slate-200 hover:border-slate-500 disabled:opacity-30"
                   >
                     + Add row
                   </button>
@@ -291,19 +292,20 @@ export default function LabLayoutEditor({ labCode, stations, current, onClose, o
             {/* Live preview */}
             <div>
               <p className="text-[11px] font-semibold text-slate-400 mb-2">Preview</p>
-              <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-                <div className="min-w-max mx-auto space-y-2">
+              {/* Seats shrink to fit a phone screen; very wide rooms scroll sideways */}
+              <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/50 p-2 sm:p-4">
+                <div className="mx-auto space-y-1.5 sm:space-y-2">
                   {layout.front === 'TOP' && frontBar}
                   {(layout.front === 'BOTTOM' ? [...preview.rows].reverse() : preview.rows).map((row, i) => (
-                    <div key={i} className={`grid gap-6 ${layout.sides === 2 ? 'grid-cols-[1fr_auto_1fr]' : 'grid-cols-1'}`}>
-                      <div className="flex justify-center gap-1.5">
+                    <div key={i} className={`grid gap-2 sm:gap-6 ${layout.sides === 2 ? 'grid-cols-[1fr_auto_1fr]' : 'grid-cols-1'}`}>
+                      <div className="flex justify-center gap-1 sm:gap-1.5">
                         {row.left.map((s) => <PreviewSeat key={s.id} id={s.id} warn={row.extra} />)}
                         {Array.from({ length: row.emptyLeft }, (_, k) => <PreviewSeat key={`el${k}`} />)}
                       </div>
                       {layout.sides === 2 && (
                         <>
-                          <div className="w-6 border-x border-dashed border-slate-700/60" aria-hidden="true" />
-                          <div className="flex justify-center gap-1.5">
+                          <div className="w-3 sm:w-6 border-x border-dashed border-slate-700/60" aria-hidden="true" />
+                          <div className="flex justify-center gap-1 sm:gap-1.5">
                             {row.right.map((s) => <PreviewSeat key={s.id} id={s.id} warn={row.extra} />)}
                             {Array.from({ length: row.emptyRight }, (_, k) => <PreviewSeat key={`er${k}`} />)}
                           </div>
@@ -318,7 +320,7 @@ export default function LabLayoutEditor({ labCode, stations, current, onClose, o
           </div>
 
           {/* Footer */}
-          <div className="sticky bottom-0 flex flex-wrap items-center gap-2 px-5 py-3 bg-slate-900 border-t border-slate-800">
+          <div className="flex-shrink-0 flex flex-wrap items-center gap-2 px-4 sm:px-5 py-3 bg-slate-900 border-t border-slate-800">
             {current && (
               <button
                 type="button"
@@ -360,14 +362,14 @@ function PreviewSeat({ id, warn = false }: { id?: string; warn?: boolean }) {
   if (!id) {
     // A seat with no PC yet (the layout has more seats than the room has PCs)
     return (
-      <span className="w-11 py-1 rounded-md text-center text-[10px] border border-dashed border-slate-700 text-slate-600" title="Empty seat">
+      <span className="flex-1 min-w-[1.5rem] max-w-[2.75rem] py-1 rounded-md text-center text-[10px] border border-dashed border-slate-700 text-slate-600" title="Empty seat">
         –
       </span>
     );
   }
   return (
     <span
-      className={`w-11 py-1 rounded-md text-center font-mono text-[10px] font-semibold border ${
+      className={`flex-1 min-w-[1.5rem] max-w-[2.75rem] py-1 rounded-md text-center font-mono text-[10px] font-semibold border ${
         warn ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-slate-800 border-slate-600 text-slate-200'
       }`}
     >

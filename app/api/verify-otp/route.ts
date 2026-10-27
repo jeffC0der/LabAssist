@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { verifyAndConsumeOtp } from '@/lib/otpStore';
-import { getServiceClient, getSessionUser, markSessionVerified } from '@/lib/serverAuth';
+import { getServiceClient, getSessionUser, markSessionVerified, findAuthUserByEmail } from '@/lib/serverAuth';
 import { issueResetToken } from '@/lib/resetToken';
 import { reqEmail, reqStr, optStr, optOneOf, PATTERNS, ValidationError, errorResponse } from '@/lib/validation';
 
@@ -11,11 +11,6 @@ interface VerifyOtpRequestBody {
   purpose?: 'signup' | 'password_reset' | 'oauth_signup' | 'login' | 'verification';
   name?: string;
   password?: string;
-}
-
-async function findAuthUserByEmail(supabaseAdmin: SupabaseClient, email: string) {
-  const { data: usersList } = await supabaseAdmin.auth.admin.listUsers();
-  return usersList?.users?.find((u) => u.email?.toLowerCase() === email) || null;
 }
 
 // Create the profile for a newly verified account. Existing profiles are never overwritten,

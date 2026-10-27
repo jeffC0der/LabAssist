@@ -1,6 +1,6 @@
 'use client';
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { MOCK_WORKSTATIONS, type Workstation, type WorkstationStatus } from '@/lib/mockData';
+import { type Workstation, type WorkstationStatus } from '@/lib/mockData';
 import { supabase } from '@/lib/supabaseClient';
 
 interface WorkstationContextValue {
@@ -13,7 +13,7 @@ interface WorkstationContextValue {
 const WorkstationContext = createContext<WorkstationContextValue | null>(null);
 
 export function WorkstationProvider({ children }: { children: React.ReactNode }) {
-  const [workstations, setWorkstations] = useState<Record<string, Workstation[]>>(MOCK_WORKSTATIONS);
+  const [workstations, setWorkstations] = useState<Record<string, Workstation[]>>({});
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const refreshWorkstations = useCallback(async () => {
@@ -21,9 +21,9 @@ export function WorkstationProvider({ children }: { children: React.ReactNode })
       const res = await fetch('/api/workstations', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        if (data.workstations && Object.keys(data.workstations).length > 0) {
-          setWorkstations(data.workstations);
-        }
+        if (data.workstations && typeof data.workstations === 'object') setWorkstations(data.workstations);
+      } else if (res.status === 401) {
+        setWorkstations({});
       }
     } catch (err) {
       console.warn('Failed to load workstations from API:', err);
@@ -34,6 +34,14 @@ export function WorkstationProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     refreshWorkstations();
+  }, [refreshWorkstations]);
+
+  // Reload when the user signs in or out: the API only returns data for a signed-in caller
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') refreshWorkstations();
+    });
+    return () => data.subscription.unsubscribe();
   }, [refreshWorkstations]);
 
   // Supabase Realtime channel subscription for workstations

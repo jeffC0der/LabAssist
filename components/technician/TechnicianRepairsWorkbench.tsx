@@ -995,13 +995,13 @@ export default function TechnicianRepairsWorkbench() {
   // ── Job detail (list + detail layout): pinned header with the next step, then one tab at a time ──
   const detailTabsFor = (): Array<{ id: DetailTab; label: string }> =>
     activeWorkflowTab === 'EVALUATION'
-      ? [{ id: 'EVALUATION', label: 'Evaluation' }, { id: 'DEVICE', label: 'Device & Intake' }]
+      ? [{ id: 'DEVICE', label: 'Device & Intake' }, { id: 'EVALUATION', label: 'Evaluation' }]
       : activeWorkflowTab === 'CANCELLED'
       ? [{ id: 'OVERVIEW', label: 'Overview' }, { id: 'DEVICE', label: 'Device & Intake' }]
       : [
           { id: 'OVERVIEW', label: 'Overview' },
-          { id: 'EVALUATION', label: 'Evaluation' },
           { id: 'DEVICE', label: 'Device & Intake' },
+          { id: 'EVALUATION', label: 'Evaluation' },
           { id: 'WORK', label: 'Work & Parts' },
           { id: 'BILLING', label: 'Billing' },
         ];
@@ -2274,11 +2274,14 @@ export default function TechnicianRepairsWorkbench() {
                     </div>
 
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className={`font-extrabold text-slate-100 ${isWideLayout ? 'text-sm' : 'text-sm sm:text-base'}`}>
+                      <div className={isWideLayout ? 'flex flex-col items-start gap-1 min-w-0' : 'flex flex-wrap items-center gap-2'}>
+                        <span
+                          className={`font-extrabold text-slate-100 ${isWideLayout ? 'text-sm block max-w-full truncate' : 'text-sm sm:text-base'}`}
+                          title={job.deviceModel}
+                        >
                           {job.deviceModel}
                         </span>
-                        <span className="font-mono text-xs font-bold text-indigo-300 bg-indigo-500/15 px-2.5 py-0.5 rounded-md border border-indigo-500/30">
+                        <span className="font-mono text-xs font-bold text-indigo-300 bg-indigo-500/15 px-2.5 py-0.5 rounded-md border border-indigo-500/30 whitespace-nowrap">
                           {job.id}
                         </span>
                         {!isWideLayout && (
@@ -2290,9 +2293,9 @@ export default function TechnicianRepairsWorkbench() {
 
                       {/* Customer & Hardware Summary */}
                       <div className={`flex flex-wrap items-center gap-3 text-xs text-slate-400 mt-1 font-mono ${isWideLayout ? '[&>*:not(:first-child)]:hidden' : ''}`}>
-                        <span className="text-slate-300 flex items-center gap-1 font-sans font-medium">
-                          <User size={12} className="text-slate-500" />
-                          {job.clientName}
+                        <span className={`text-slate-300 flex items-center gap-1 font-sans font-medium ${isWideLayout ? 'min-w-0 max-w-full' : ''}`}>
+                          <User size={12} className="text-slate-500 flex-shrink-0" />
+                          <span className={isWideLayout ? 'truncate' : ''}>{job.clientName}</span>
                         </span>
                         <span className="text-slate-600">·</span>
                         <span className="text-slate-400 flex items-center gap-1">
@@ -2841,7 +2844,7 @@ export default function TechnicianRepairsWorkbench() {
                 <span className="text-slate-500 font-sans uppercase text-[11px] font-bold block">Customer Details:</span>
                 <div><span className="text-slate-400">Client Name: </span><strong className="text-slate-100">{invoiceViewData.clientName}</strong></div>
                 {invoiceViewData.clientEmail && <div><span className="text-slate-400">Email: </span><span className="text-slate-300">{invoiceViewData.clientEmail}</span></div>}
-                <div><span className="text-slate-400">Assigned Tech: </span><strong className="text-slate-200">{invoiceViewData.assignedTechnician && invoiceViewData.assignedTechnician !== 'Tech. Alex Torres' ? invoiceViewData.assignedTechnician : 'Unassigned'}</strong></div>
+                <div><span className="text-slate-400">Assigned Tech: </span><strong className="text-slate-200">{invoiceViewData.assignedTechnician || 'Unassigned'}</strong></div>
               </div>
 
               <div className="space-y-1.5">

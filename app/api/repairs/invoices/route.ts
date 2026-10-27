@@ -6,7 +6,6 @@ import { notifyUser, formatPeso } from '@/lib/notifications';
 import { WORK_SCOPE_MAX } from '@/lib/repairLimits';
 import { errorResponse, readJson, optStr, optOneOf, optNum, optEmail, ValidationError, PATTERNS } from '@/lib/validation';
 import {
-  getInMemoryInvoice,
   setInMemoryInvoice,
   extractWorkflowMetadata,
   packWorkflowMetadata,
@@ -23,83 +22,8 @@ function getSupabaseAdmin() {
   });
 }
 
-// In-memory fallback cache for development/demo resiliency
-const inMemoryInvoices: Record<string, any> = {
-  '01-LP-2026-0928': {
-    id: 'c1111111-1111-1111-1111-111111111111',
-    invoiceNumber: 'INV-01-2026-0928',
-    jobOrderNumber: '01-LP-2026-0928',
-    issueDate: '2026-09-28',
-    paymentTiming: 'PAY_AFTER_REPAIR',
-    paymentStatus: 'UNPAID',
-    paymentMethod: 'ONLINE',
-    clientName: 'Marcus Vance',
-    clientEmail: 'marcus.vance@umak.edu.ph',
-    deviceModel: 'Lenovo Legion 5 15ARH05',
-    serialNumber: 'PF2X9Y8Z',
-    assignedTechnician: 'Tech. Alex Torres',
-    totalAmount: 1850.0,
-    amountPaid: 0.0,
-    onlinePaymentReference: null,
-    settlementDate: null,
-    billingNotes: 'Includes 30-day parts warranty for keyboard membrane.',
-    items: [
-      {
-        id: 'item-1',
-        workScope: 'Motherboard Ultrasonic Cleaning & Solder Rework',
-        itemName: 'Daughterboard Flux & Ultrasonic Solvents',
-        quantity: 1,
-        unitCost: 650.0,
-        totalCost: 650.0,
-      },
-      {
-        id: 'item-2',
-        workScope: 'Replacement Keyboard Membrane Assembly',
-        itemName: 'OEM Keyboard Membrane (P/N: 5CB0Z21516)',
-        quantity: 1,
-        unitCost: 1200.0,
-        totalCost: 1200.0,
-      },
-    ],
-  },
-  '02-PC-2026-0928': {
-    id: 'c2222222-2222-2222-2222-222222222222',
-    invoiceNumber: 'INV-02-2026-0928',
-    jobOrderNumber: '02-PC-2026-0928',
-    issueDate: '2026-09-28',
-    paymentTiming: 'PAY_AFTER_REPAIR',
-    paymentStatus: 'UNPAID',
-    paymentMethod: 'CASH',
-    clientName: 'Alyssa Gomez',
-    clientEmail: 'alyssa.gomez@umak.edu.ph',
-    deviceModel: 'Dell OptiPlex 7080 Micro Tower',
-    serialNumber: 'DL7080-99X4',
-    assignedTechnician: 'Tech. Alex Torres',
-    totalAmount: 650.0,
-    amountPaid: 0.0,
-    onlinePaymentReference: null,
-    settlementDate: null,
-    billingNotes: 'Basic diagnostic & thermal paste repasting.',
-    items: [
-      {
-        id: 'item-1',
-        workScope: 'Bench Diagnostics & Contact Oxidation Cleaning',
-        itemName: 'Contact Cleaner & Arctic MX-4 Compound',
-        quantity: 1,
-        unitCost: 500.0,
-        totalCost: 500.0,
-      },
-      {
-        id: 'item-2',
-        workScope: 'Battery Replacement',
-        itemName: 'CMOS CR2032 Lithium Cell',
-        quantity: 1,
-        unitCost: 150.0,
-        totalCost: 150.0,
-      },
-    ],
-  },
-};
+const NO_DATABASE = () =>
+  NextResponse.json({ error: 'Server configuration error: the database is not connected.' }, { status: 500 });
 
 /**
  * Generates an Invoice ID following the required standard:
@@ -116,20 +40,7 @@ async function generateInvoiceNumber(supabase: any, targetDate: Date = new Date(
 
   let maxQueue = 0;
 
-  // 1. Check in-memory invoices cache for matches today
-  Object.values(inMemoryInvoices).forEach((inv: any) => {
-    if (inv?.invoiceNumber) {
-      const match = String(inv.invoiceNumber).match(pattern);
-      if (match && match[1]) {
-        const q = parseInt(match[1], 10);
-        if (!isNaN(q) && q > maxQueue) {
-          maxQueue = q;
-        }
-      }
-    }
-  });
-
-  // 2. Query database as source of truth if connected
+  // Query the database (source of truth)
   if (supabase) {
     try {
       // First try stored RPC if defined
@@ -220,14 +131,7 @@ export async function GET(request: Request) {
     const isOwner = !!own && (own.user_id === auth.user.id || (own.client_email || '').toLowerCase() === auth.user.email);
     if (!isOwner) return NextResponse.json({ error: 'You do not have permission to do this.' }, { status: 403 });
   }
-  if (!supabase) {
-    const fallback = jobOrderNumber ? inMemoryInvoices[jobOrderNumber] : null;
-    return NextResponse.json({
-      invoice: fallback || null,
-      items: fallback?.items || [],
-      message: 'Supabase client unavailable, using fallback',
-    });
-  }
+  if (!supabase) return NO_DATABASE();
 
   try {
     // Dedicated repair_invoices table is the source of truth for device repair invoices.
@@ -300,22 +204,19 @@ export async function GET(request: Request) {
           return NextResponse.json({ invoice: formatted, items: formatted.items });
         }
 
-        const mem = inMemoryInvoices[jobOrderNumber];
-        return NextResponse.json({ invoice: mem || null, items: mem?.items || [] });
+        return NextResponse.json({ invoice: null, items: [] });
       }
     }
 
     const { data: invoice, error } = await query.maybeSingle();
 
     if (error) {
-      console.warn('Invoice fetch error:', error.message);
-      const mem = jobOrderNumber ? inMemoryInvoices[jobOrderNumber] : null;
-      return NextResponse.json({ invoice: mem || null, items: mem?.items || [] });
+      console.error('Invoice fetch error:', error.message);
+      return NextResponse.json({ error: 'Could not load the invoice.' }, { status: 500 });
     }
 
     if (!invoice) {
-      const mem = jobOrderNumber ? inMemoryInvoices[jobOrderNumber] : null;
-      return NextResponse.json({ invoice: mem || null, items: mem?.items || [] });
+      return NextResponse.json({ invoice: null, items: [] });
     }
 
     // Format invoice with full hydrated fields
@@ -518,15 +419,15 @@ export async function POST(request: Request) {
     const todayDate = new Date().toISOString().split('T')[0];
 
     // Check if an existing invoice exists for this Job Order to preserve its invoice number
-    let invoiceNumber = inMemoryInvoices[joNum]?.invoiceNumber;
+    let invoiceNumber: string | undefined;
     let existingInvId: string | null = null;
     let targetJobOrderId = jobOrderId;
 
-    let resolvedEmail = clientEmail || inMemoryInvoices[joNum]?.clientEmail || null;
-    let resolvedClientName = clientName || inMemoryInvoices[joNum]?.clientName || 'UMak Student / Faculty';
-    let resolvedDevice = deviceModel || inMemoryInvoices[joNum]?.deviceModel || 'Hardware Unit';
-    let resolvedSerial = serialNumber || inMemoryInvoices[joNum]?.serialNumber || 'N/A';
-    let resolvedTechnician = assignedTechnician || inMemoryInvoices[joNum]?.assignedTechnician || 'Unassigned';
+    let resolvedEmail = clientEmail || null;
+    let resolvedClientName = clientName || 'UMak Student / Faculty';
+    let resolvedDevice = deviceModel || 'Hardware Unit';
+    let resolvedSerial = serialNumber || 'N/A';
+    let resolvedTechnician = assignedTechnician || 'Unassigned';
 
     if (supabase) {
       try {
@@ -709,8 +610,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // Store in global in-memory cache and sync to extended repair store
-    inMemoryInvoices[joNum] = formattedInvoice;
+    // Keep the per-instance workflow cache in step (it is never preferred over the database)
     setInMemoryInvoice(joNum, formattedInvoice);
 
     // Database persistence
@@ -839,7 +739,6 @@ export async function POST(request: Request) {
 
         emailDispatched = emailRes.success;
         emailMessageId = emailRes.messageId;
-        console.log(`[Invoices POST] Invoice notification email dispatched to ${resolvedEmail}: success=${emailRes.success}`);
       } catch (emailErr) {
         console.error('[Invoices POST] Error sending Brevo invoice email:', emailErr);
       }

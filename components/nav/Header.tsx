@@ -96,7 +96,7 @@ export default function Header() {
 
   return (
     <header className="nav-blur sticky top-0 z-40 h-16 border-b border-slate-800/80" role="banner">
-      <div className="max-w-[1650px] mx-auto px-4 sm:px-6 h-full flex items-center justify-between gap-4">
+      <div className="max-w-[1650px] mx-auto px-3 sm:px-6 h-full flex items-center justify-between gap-2 sm:gap-4">
         {/* Left: Brand Logo & WS Status */}
         <div className="flex items-center gap-3 sm:gap-4 flex-shrink-0">
           <Link href="/" className="flex items-center gap-2.5 group" aria-label="LabAssist Home">
@@ -107,7 +107,8 @@ export default function Header() {
               height={32}
               className="w-8 h-8 object-contain rounded-full drop-shadow-md group-hover:scale-105 transition-transform duration-300"
             />
-            <div className="flex items-center">
+            {/* Phones show the logo only, so the bar fits the screen */}
+            <div className="hidden sm:flex items-center">
               <span className="text-sm font-bold text-slate-100 tracking-tight">Lab</span>
               <span className="text-sm font-bold gradient-text tracking-tight">Assist</span>
             </div>
@@ -127,7 +128,7 @@ export default function Header() {
         </div>
 
         {/* Center: Protected Role Navigation Links (Only Authorized Route for User's Role) */}
-        <nav className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800" role="navigation" aria-label="Main Navigation">
+        <nav className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800 min-w-0" role="navigation" aria-label="Main Navigation">
           {/* Student Portal Link - Accessible strictly to STUDENT */}
           {role === 'STUDENT' && (
             <Link
@@ -139,7 +140,8 @@ export default function Header() {
               }`}
             >
               <GraduationCap size={14} />
-              <span>Student Portal</span>
+              <span className="hidden sm:inline">Student Portal</span>
+              <span className="sm:hidden">Portal</span>
             </Link>
           )}
 
@@ -154,7 +156,8 @@ export default function Header() {
               }`}
             >
               <Wrench size={13} />
-              <span>Technician Queue</span>
+              <span className="hidden sm:inline">Technician Queue</span>
+              <span className="sm:hidden">Queue</span>
             </Link>
           )}
 
@@ -169,13 +172,14 @@ export default function Header() {
               }`}
             >
               <Shield size={13} />
-              <span>Admin Console</span>
+              <span className="hidden sm:inline">Admin Console</span>
+              <span className="sm:hidden">Admin</span>
             </Link>
           )}
         </nav>
 
         {/* Right: Theme switch, Notifications & User Profile */}
-        <div className="flex items-center gap-2.5 flex-shrink-0">
+        <div className="flex items-center gap-1 sm:gap-2.5 flex-shrink-0">
           <ThemeToggle />
 
           {/* Notification bell: the user's real notifications (newest 5, short titles) */}
@@ -198,7 +202,7 @@ export default function Header() {
             </button>
 
             {notifOpen && (
-              <div className="absolute right-0 top-11 w-80 dropdown-menu p-2 z-50 animate-fade-in text-left">
+              <div className="fixed left-3 right-3 top-16 sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-80 dropdown-menu p-2 z-50 animate-fade-in text-left">
                 <div className="flex items-center justify-between px-2 pt-1 pb-2">
                   <p className="text-xs font-semibold text-slate-300">Notifications</p>
                   {unreadCount > 0 && (

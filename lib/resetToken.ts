@@ -20,6 +20,19 @@ export function issueResetToken(email: string): string {
   return `${payload}.${sign(payload)}`;
 }
 
+/**
+ * The time the token was issued (ms). update-password stores the time of each completed reset on
+ * the account, and a token issued before that time has already been used (one use per token).
+ */
+export function resetTokenIssuedAt(token: string): number {
+  try {
+    const { exp } = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8'));
+    return typeof exp === 'number' ? exp - TTL_MS : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /** Returns the email the token was issued for, or null if it is invalid or expired. */
 export function verifyResetToken(token: string): string | null {
   if (!token || typeof token !== 'string') return null;

@@ -1,6 +1,6 @@
 'use client';
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { MOCK_TICKETS, type Ticket, type TicketStatus, type TicketCategory } from '@/lib/mockData';
+import { type Ticket, type TicketStatus, type TicketCategory } from '@/lib/mockData';
 import { supabase } from '@/lib/supabaseClient';
 
 interface TicketFilters {
@@ -33,7 +33,7 @@ const defaultFilters: TicketFilters = {
 const TicketContext = createContext<TicketContextValue | null>(null);
 
 export function TicketProvider({ children }: { children: React.ReactNode }) {
-  const [tickets, setTickets] = useState<Ticket[]>(MOCK_TICKETS);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
   const [filters, setFilters] = useState<TicketFilters>(defaultFilters);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
@@ -43,9 +43,9 @@ export function TicketProvider({ children }: { children: React.ReactNode }) {
       const res = await fetch('/api/tickets', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        if (data.tickets && Array.isArray(data.tickets) && data.tickets.length > 0) {
-          setTickets(data.tickets);
-        }
+        if (Array.isArray(data.tickets)) setTickets(data.tickets);
+      } else if (res.status === 401) {
+        setTickets([]);
       }
     } catch (err) {
       console.warn('Failed to load tickets from API, using cached state:', err);

@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { issueAndSendOtp } from '@/lib/otpEmail';
-import { getServiceClient } from '@/lib/serverAuth';
 import { reqEmail, optOneOf, optStr, errorResponse } from '@/lib/validation';
 
 const OTP_PURPOSES = ['signup', 'password_reset', 'oauth_signup', 'login', 'verification'] as const;
@@ -34,21 +33,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    // Signup codes are only for emails that aren't registered yet (checked here because
-    // browsers can no longer read other users' profiles)
-    if (purpose === 'signup') {
-      const supabaseAdmin = getServiceClient();
-      const { data: existing } = supabaseAdmin
-        ? await supabaseAdmin.from('profiles').select('id').eq('email', cleanEmail).maybeSingle()
-        : { data: null };
-      if (existing) {
-        return NextResponse.json(
-          { success: false, error: 'An account with this email address already exists.' },
-          { status: 409 }
-        );
-      }
-    }
-
+    // The response is the same whether or not the email already has an account, so this can't be
+    // used to find out who is registered. A signup code for an existing account only proves
+    // ownership of the email (verify-otp then updates that account; its role never changes).
     const result = await issueAndSendOtp(cleanEmail, purpose, name);
     if (!result.ok) {
       return NextResponse.json(

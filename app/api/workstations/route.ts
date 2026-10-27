@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { MOCK_WORKSTATIONS, type Workstation, type WorkstationStatus } from '@/lib/mockData';
+import { type Workstation, type WorkstationStatus } from '@/lib/mockData';
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 import { errorResponse, readJson, reqStr, optStr, optOneOf, PATTERNS } from '@/lib/validation';
 
@@ -29,10 +29,13 @@ function rowToWorkstation(row: any): Workstation {
 }
 
 // ── GET: Fetch all workstations grouped by lab ──
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAuth(request);
+  if (auth.response) return auth.response;
+
   const supabase = getSupabaseAdmin();
   if (!supabase) {
-    return NextResponse.json({ workstations: MOCK_WORKSTATIONS });
+    return NextResponse.json({ error: 'Server configuration error.' }, { status: 500 });
   }
 
   try {
@@ -41,32 +44,13 @@ export async function GET() {
       .select('*')
       .order('pc_num', { ascending: true });
 
-    if (!data || data.length === 0) {
-      // Auto-seed workstations table from initial fleet definition
-      const allRows: any[] = [];
-      for (const [labCode, stations] of Object.entries(MOCK_WORKSTATIONS)) {
-        for (const s of stations) {
-          allRows.push({
-            lab_code: labCode,
-            pc_num: s.id,
-            status: s.status,
-            assigned_user: s.user || null,
-            ip_address: s.ip,
-            specs: s.specs,
-            active_issue: s.activeIssue || null,
-          });
-        }
-      }
-      try {
-        await supabase.from('workstations').upsert(allRows, { onConflict: 'lab_code,pc_num' });
-      } catch (seedErr) {
-        console.warn('Workstation auto-seed notice:', seedErr);
-      }
-      return NextResponse.json({ workstations: MOCK_WORKSTATIONS });
+    if (error) {
+      console.error('Workstations query error:', error.message);
+      return NextResponse.json({ error: 'Could not load workstations.' }, { status: 500 });
     }
 
     const grouped: Record<string, Workstation[]> = {};
-    for (const row of data) {
+    for (const row of data || []) {
       const ws = rowToWorkstation(row);
       if (!grouped[ws.labId]) {
         grouped[ws.labId] = [];
@@ -77,7 +61,7 @@ export async function GET() {
     return NextResponse.json({ workstations: grouped });
   } catch (err: any) {
     console.error('Error fetching workstations:', err);
-    return NextResponse.json({ workstations: MOCK_WORKSTATIONS });
+    return NextResponse.json({ error: 'Could not load workstations.' }, { status: 500 });
   }
 }
 

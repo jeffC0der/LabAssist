@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Monitor, User, AlertTriangle, Sparkles, ArrowUpRight, X, ArrowLeft, CheckCircle2, Pencil } from 'lucide-react';
+import { Monitor, User, AlertTriangle, Sparkles, ArrowUpRight, X, ArrowLeft, ArrowRight, CheckCircle2, Pencil } from 'lucide-react';
 import { LAB_ROOMS, type Workstation, type WorkstationStatus, type Ticket } from '@/lib/mockData';
 import { useWorkstations } from '@/context/WorkstationContext';
 import { useTickets } from '@/context/TicketContext';
@@ -77,6 +77,18 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
   // Saved layouts arrive after the first render; wait for them so a room never flashes the default first
   const [layoutsLoaded, setLayoutsLoaded] = useState(false);
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
+
+  // Width available to the room drawing: on narrow screens (phones) the room switches to compact tiles
+  const [roomWidth, setRoomWidth] = useState(0);
+  const roomObserver = useRef<ResizeObserver | null>(null);
+  const roomRef = useCallback((el: HTMLDivElement | null) => {
+    roomObserver.current?.disconnect();
+    roomObserver.current = null;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => setRoomWidth(Math.floor(entry.contentRect.width)));
+    observer.observe(el);
+    roomObserver.current = observer;
+  }, []);
 
   const layoutRequest = useRef(0);
   const loadLayouts = useCallback(async () => {
@@ -243,6 +255,10 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
           <p className={`seat-label font-semibold uppercase tracking-wide truncate ${isDimmed ? 'text-slate-500' : tone.text}`}>{tone.label}</p>
           {station.ip && <p className="seat-extra font-mono text-slate-500 truncate">{station.ip}</p>}
         </div>
+        {/* Small tiles (phones): just the PC number, in its status color */}
+        <span className={`seat-num font-mono font-bold ${isDimmed ? 'text-slate-500' : tone.text}`} aria-hidden="true">
+          {station.id.replace(/^PC-?/i, '')}
+        </span>
       </button>
     );
   };
@@ -256,63 +272,98 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
     const twoSides = layout.sides === 2;
 
     // Size every tile from the widest row: the room fills the panel, so fewer PCs per row = bigger tiles.
-    // Tiles stay between SEAT_MIN and SEAT_MAX; below the minimum the room scrolls sideways instead.
-    const SEAT_MIN = 72;
-    const SEAT_MAX = 180;
-    const GAP = 8;
-    const AISLE = twoSides ? 48 : 0;
+    // Narrow screens (phones) use tighter spacing and compact number-only tiles, so a whole room (both sides
+    // and the front marker) fits on screen. Below SEAT_MIN the room scrolls sideways, with a hint.
     const maxLeft = Math.max(1, ...filled.map((r) => r.left.length));
     const maxRight = twoSides ? Math.max(1, ...filled.map((r) => r.right.length)) : 0;
     const cols = maxLeft + maxRight;
-    const fixed = (maxLeft - 1) * GAP + (twoSides ? (maxRight - 1) * GAP + AISLE : 0);
+    const spacing = (gap: number, aisle: number) => (maxLeft - 1) * gap + (twoSides ? (maxRight - 1) * gap + aisle : 0);
+    // Compact whenever full-size tiles (72px+) wouldn't fit across the available width
+    const compact = roomWidth > 0 && cols * 72 + spacing(8, 48) > roomWidth;
+    const SEAT_MIN = compact ? 30 : 72;
+    const SEAT_MAX = 180;
+    const GAP = compact ? 4 : 8;
+    const AISLE = twoSides ? (compact ? 20 : 48) : 0;
+    const fixed = spacing(GAP, AISLE);
+    const minRoomWidth = cols * SEAT_MIN + fixed;
+    const scrolls = roomWidth > 0 && minRoomWidth > roomWidth;
+    // Tiles under 64px show only the number (see .seat-num in globals.css)
+    const numberOnly = compact && (Math.max(roomWidth, minRoomWidth) - fixed) / cols < 64;
     const sideWidth = (n: number) => `calc(${n} * var(--seat-w) + ${(n - 1) * GAP}px)`;
     const roomStyle = {
       containerType: 'inline-size',
-      minWidth: cols * SEAT_MIN + fixed,
+      minWidth: minRoomWidth,
       maxWidth: cols * SEAT_MAX + fixed,
       // cqw = width of this room box, so the tile width follows the available space
       '--seat-w': `calc((100cqw - ${fixed}px) / ${cols})`,
     } as React.CSSProperties;
 
     const front = (
-      <div className="w-full text-center py-1.5 sm:py-2 rounded-lg bg-slate-700/30 border border-slate-600/50 text-[10px] sm:text-xs font-semibold tracking-[0.15em] uppercase text-slate-300 px-3 truncate">
+      <div className="w-full text-center py-1.5 sm:py-2 rounded-lg bg-slate-700/30 border border-slate-600/50 text-[10px] sm:text-xs font-semibold tracking-[0.1em] sm:tracking-[0.15em] uppercase text-slate-300 px-2 sm:px-3 truncate">
         {layout.frontLabel}
       </div>
     );
+    const legend: Array<[string, string]> = [
+      ['bg-emerald-400', 'Ready'],
+      ['bg-indigo-400', 'In use'],
+      ['bg-amber-400', 'Issue'],
+      ['bg-rose-500', 'Repair'],
+    ];
     return (
-      <div className="overflow-x-auto rounded-xl border border-slate-800/80 bg-slate-950/40 p-3 sm:p-5">
-        <div className="mx-auto w-full space-y-3 sm:space-y-4" style={roomStyle}>
-          {layout.front === 'TOP' && front}
-          {ordered.map((row, i) => (
-            <div key={i} className="flex items-stretch justify-center">
-              <div className="flex justify-center" style={{ width: sideWidth(maxLeft), gap: GAP }}>
-                {row.left.map((s) => renderSeat(lab, s, statusFilter))}
+      <div className="space-y-2">
+        {scrolls && (
+          <p className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
+            <ArrowLeft size={12} aria-hidden="true" />
+            Swipe sideways to see the whole room
+            <ArrowRight size={12} aria-hidden="true" />
+          </p>
+        )}
+        <div ref={roomRef} className="overflow-x-auto overscroll-x-contain rounded-xl border border-slate-800/80 bg-slate-950/40 p-2 sm:p-5">
+          <div className={`mx-auto w-full ${compact ? 'space-y-2' : 'space-y-3 sm:space-y-4'}`} style={roomStyle}>
+            {layout.front === 'TOP' && front}
+            {ordered.map((row, i) => (
+              <div key={i} className="flex items-stretch justify-center">
+                <div className="flex justify-center" style={{ width: sideWidth(maxLeft), gap: GAP }}>
+                  {row.left.map((s) => renderSeat(lab, s, statusFilter))}
+                </div>
+                {twoSides && (
+                  <>
+                    <div className="flex justify-center flex-shrink-0" style={{ width: AISLE }} aria-hidden="true">
+                      <div className="w-px border-l border-dashed border-slate-700/60" />
+                    </div>
+                    <div className="flex justify-center" style={{ width: sideWidth(maxRight), gap: GAP }}>
+                      {row.right.map((s) => renderSeat(lab, s, statusFilter))}
+                    </div>
+                  </>
+                )}
               </div>
-              {twoSides && (
-                <>
-                  <div className="flex justify-center flex-shrink-0" style={{ width: AISLE }} aria-hidden="true">
-                    <div className="w-px border-l border-dashed border-slate-700/60" />
-                  </div>
-                  <div className="flex justify-center" style={{ width: sideWidth(maxRight), gap: GAP }}>
-                    {row.right.map((s) => renderSeat(lab, s, statusFilter))}
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-          {layout.front === 'BOTTOM' && front}
-          {extraCount > 0 && canEditLayout && (
-            <p className="text-[10px] sm:text-xs text-slate-500 text-center">
-              {extraCount} PC{extraCount === 1 ? ' was' : 's were'} added to new rows automatically · use Edit Layout to arrange {extraCount === 1 ? 'it' : 'them'}
-            </p>
-          )}
+            ))}
+            {layout.front === 'BOTTOM' && front}
+            {extraCount > 0 && canEditLayout && (
+              <p className="text-[10px] sm:text-xs text-slate-500 text-center">
+                {extraCount} PC{extraCount === 1 ? ' was' : 's were'} added to new rows automatically · use Edit Layout to arrange {extraCount === 1 ? 'it' : 'them'}
+              </p>
+            )}
+          </div>
         </div>
+        {/* Compact tiles only show the number: say what the colors mean */}
+        {numberOnly && (
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] text-slate-400" aria-label="Status colors">
+            {legend.map(([dot, label]) => (
+              <span key={label} className="flex items-center gap-1">
+                <span className={`w-2 h-2 rounded-full ${dot}`} aria-hidden="true" />
+                {label}
+              </span>
+            ))}
+            <span className="text-slate-500">· Tap a PC for details</span>
+          </div>
+        )}
       </div>
     );
   };
 
   return (
-    <div className="glass rounded-2xl p-5 border border-slate-800/80">
+    <div className="glass rounded-2xl p-3 sm:p-5 border border-slate-800/80">
       {/* Header & Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800/70">
         <div>
@@ -582,23 +633,25 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
             aria-labelledby="station-detail-title"
           >
             <div
-              className="w-full max-w-md bg-slate-900 border border-slate-700/80 rounded-2xl p-5 shadow-2xl space-y-4 animate-scale-up"
+              className="w-full max-w-md bg-slate-900 border border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-2xl space-y-4 animate-scale-up"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 flex-shrink-0">
                     <Monitor size={20} />
                   </div>
-                  <div>
-                    <h3 id="station-detail-title" className="text-base font-bold text-slate-100 flex items-center gap-2">
+                  <div className="min-w-0">
+                    <h3 id="station-detail-title" className="text-base font-bold text-slate-100 truncate">
                       {modalLab} — {liveModalStation.id}
                     </h3>
                     <p className="text-xs text-slate-400 font-mono">{liveModalStation.ip}</p>
+                    {/* Phones: the status goes under the name so the header fits */}
+                    <div className="mt-1 sm:hidden">{getStatusBadge(liveModalStation.status)}</div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {getStatusBadge(liveModalStation.status)}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="hidden sm:inline-flex">{getStatusBadge(liveModalStation.status)}</span>
                   <button
                     type="button"
                     onClick={() => setActiveModal(null)}

@@ -244,7 +244,6 @@ export async function issueAndSendOtp(
 
     const messageId =
       sendResponse.messageId || (sendResponse.messageIds && sendResponse.messageIds[0]) || undefined;
-    console.log(`[otp-email] Sent ${purpose} code to ${cleanEmail}, messageId: ${messageId}`);
     return { ok: true, status: 200, messageId };
   } catch (error: any) {
     const errorMessage = error?.body?.message || error?.message || 'An unexpected error occurred while sending the OTP email.';

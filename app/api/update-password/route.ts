@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getServiceClient } from '@/lib/serverAuth';
-import { verifyResetToken } from '@/lib/resetToken';
+import { getServiceClient, findAuthUserByEmail } from '@/lib/serverAuth';
+import { verifyResetToken, resetTokenIssuedAt } from '@/lib/resetToken';
 import { resetLockout } from '@/lib/lockoutStore';
 import { errorResponse } from '@/lib/validation';
 
@@ -45,8 +45,7 @@ export async function POST(request: Request) {
     }
 
     // Find the user by email
-    const { data: usersList } = await supabaseAdmin.auth.admin.listUsers();
-    const targetUser = usersList?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
+    const targetUser = await findAuthUserByEmail(supabaseAdmin, cleanEmail);
 
     if (!targetUser) {
       return NextResponse.json(
@@ -55,9 +54,19 @@ export async function POST(request: Request) {
       );
     }
 
+    // Each reset link works once: a link issued before the last completed reset is spent
+    const lastResetAt = Number(targetUser.app_metadata?.password_reset_at || 0);
+    if (resetTokenIssuedAt(resetToken) <= lastResetAt) {
+      return NextResponse.json(
+        { success: false, error: 'This password reset has already been used. Please request a new recovery code.' },
+        { status: 401 }
+      );
+    }
+
     // Update the password
     const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(targetUser.id, {
       password: newPassword,
+      app_metadata: { ...targetUser.app_metadata, password_reset_at: Date.now() },
     });
 
     if (updateErr) {

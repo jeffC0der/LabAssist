@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { requireAuth, markSessionVerified } from '@/lib/serverAuth';
+import { requireAuth, markSessionVerified, findAuthUserByEmail } from '@/lib/serverAuth';
 import { errorResponse, optStr, optBool } from '@/lib/validation';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
@@ -51,8 +51,7 @@ export async function POST(request: Request) {
     let targetUserId = userId;
 
     if (!targetUserId && cleanEmail && supabaseAdmin) {
-      const { data: usersList } = await supabaseAdmin.auth.admin.listUsers();
-      const match = usersList?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
+      const match = await findAuthUserByEmail(supabaseAdmin, cleanEmail);
       if (match) {
         targetUserId = match.id;
       }
@@ -196,8 +195,7 @@ export async function GET(request: Request) {
       const { data } = await supabaseAdmin.auth.admin.getUserById(userId);
       authUser = data?.user;
     } else if (cleanEmail) {
-      const { data: usersList } = await supabaseAdmin.auth.admin.listUsers();
-      authUser = usersList?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
+      authUser = await findAuthUserByEmail(supabaseAdmin, cleanEmail);
     }
 
     if (authUser?.user_metadata?.require_login_otp !== undefined) {

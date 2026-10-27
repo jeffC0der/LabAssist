@@ -70,7 +70,7 @@ export async function fetchRepairInvoice(jobOrderNumber: string): Promise<any | 
 }
 
 /** A technician name, ignoring the old built-in placeholder some early invoices were saved with. */
-const realName = (name?: string | null) => (name && name !== 'Tech. Alex Torres' && name !== 'Unassigned' ? name : null);
+const realName = (name?: string | null) => (name && name !== 'Unassigned' ? name : null);
 
 export const lineTotal =(it: ReceiptLineItem) => Number(it.quantity || 0) * Number(it.unitCost || 0);
 

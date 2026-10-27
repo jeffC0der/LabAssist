@@ -92,7 +92,6 @@ Please present your Job Order Number at the IT Diagnostics Desk when following u
       (sendResponse.messageIds && sendResponse.messageIds[0]) ||
       undefined;
 
-    console.log(`[sendRepairReceiptEmail] Successfully dispatched receipt email to ${receipt.clientEmail}, messageId: ${messageId}`);
 
     return { success: true, messageId };
   } catch (err: any) {
@@ -257,7 +256,6 @@ Please present your Invoice ID (${invoice.invoiceId}) or Job Order (${invoice.jo
       (sendResponse.messageIds && sendResponse.messageIds[0]) ||
       undefined;
 
-    console.log(`[sendInvoiceNotificationEmail] Successfully dispatched invoice email to ${invoice.clientEmail}, messageId: ${messageId}`);
 
     return { success: true, messageId };
   } catch (err: any) {
@@ -349,7 +347,6 @@ ${data.pickupLocation}`;
       (sendResponse.messageIds && sendResponse.messageIds[0]) ||
       undefined;
 
-    console.log(`[sendReadyForPickupEmail] Successfully dispatched pickup email to ${data.clientEmail}, messageId: ${messageId}`);
 
     return { success: true, messageId };
   } catch (err: any) {
@@ -459,7 +456,6 @@ Thank you for using UMakLabAssist!`;
       (sendResponse.messageIds && sendResponse.messageIds[0]) ||
       undefined;
 
-    console.log(`[sendFinalReceiptEmail] Successfully dispatched final receipt email to ${data.clientEmail}, messageId: ${messageId}`);
 
     return { success: true, messageId };
   } catch (err: any) {

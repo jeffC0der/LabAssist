@@ -553,6 +553,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (stateRes.ok) {
           const { state } = await stateRes.json();
           oauthState = state;
+          // Tie the state to this browser tab: the callback only accepts the state it started with
+          try { sessionStorage.setItem('labassist_oauth_state', state); } catch {}
         }
       } catch {
         // Non-fatal: proceed without state if server is unreachable during generation

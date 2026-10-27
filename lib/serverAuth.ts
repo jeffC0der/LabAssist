@@ -38,6 +38,32 @@ export function getServiceClient(): SupabaseClient | null {
   return adminClient;
 }
 
+/** Every sign-in account (listUsers returns one page at a time, 50 by default). */
+export async function listAllAuthUsers(client: SupabaseClient): Promise<SupabaseUser[]> {
+  const all: SupabaseUser[] = [];
+  const perPage = 1000;
+  for (let page = 1; page <= 100; page++) {
+    const { data, error } = await client.auth.admin.listUsers({ page, perPage });
+    if (error) throw error;
+    const users = data?.users || [];
+    all.push(...users);
+    if (users.length < perPage) break;
+  }
+  return all;
+}
+
+/** The sign-in account for an email: looked up through its profile first, then across every account page. */
+export async function findAuthUserByEmail(client: SupabaseClient, email: string): Promise<SupabaseUser | null> {
+  const clean = email.trim().toLowerCase();
+  const { data: profile } = await client.from('profiles').select('id').eq('email', clean).maybeSingle();
+  if (profile?.id) {
+    const { data } = await client.auth.admin.getUserById(profile.id);
+    if (data?.user && data.user.email?.toLowerCase() === clean) return data.user;
+  }
+  const users = await listAllAuthUsers(client);
+  return users.find((u) => u.email?.toLowerCase() === clean) || null;
+}
+
 /** The Supabase session id inside an access token (the token itself is validated separately). */
 export function sessionIdFromToken(accessToken: string): string | null {
   try {

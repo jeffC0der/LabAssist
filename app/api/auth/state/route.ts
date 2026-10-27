@@ -12,7 +12,8 @@ import crypto from 'crypto';
 import { encrypt, decrypt } from '@/lib/aes';
 
 // In-memory nonce registry: prevents replay attacks within the state TTL window.
-// (Nonces are only valid once and expire after STATE_TTL_MS.)
+// (Nonces are only valid once and expire after STATE_TTL_MS.) This memory is per server instance,
+// so the callback page also requires the state to match the one its own browser tab started with.
 declare global {
   // eslint-disable-next-line no-var
   var __labassist_oauth_nonces__: Map<string, number> | undefined;

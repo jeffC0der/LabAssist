@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { requireAuth } from '@/lib/serverAuth';
+import { requireAuth, listAllAuthUsers } from '@/lib/serverAuth';
 import { errorResponse, readJson, optUuid, optEmail, oneOf } from '@/lib/validation';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://uhkpqacieloefhzrciae.supabase.co';
@@ -32,8 +32,7 @@ export async function GET(request: Request) {
     // 2. Fetch from auth.users to ensure 100% complete list
     let authUsers: any[] = [];
     try {
-      const { data: authData } = await supabaseAdmin.auth.admin.listUsers();
-      authUsers = authData?.users || [];
+      authUsers = await listAllAuthUsers(supabaseAdmin);
     } catch {}
 
     const profileMap = new Map<string, any>();

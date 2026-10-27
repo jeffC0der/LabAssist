@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { MOCK_TICKETS, type Ticket, type TicketStatus } from '@/lib/mockData';
+import { type Ticket, type TicketStatus } from '@/lib/mockData';
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 import { notifyUser } from '@/lib/notifications';
 import { errorResponse, readJson, reqStr, optStr, oneOf, optOneOf, optDate, PATTERNS } from '@/lib/validation';
@@ -83,14 +83,14 @@ function ticketToRow(ticket: Ticket) {
   };
 }
 
-// ── GET: Fetch all tickets (seeds DB with initial tickets if empty) ──
+// ── GET: Fetch all tickets ──
 export async function GET(request: Request) {
   const auth = await requireAuth(request);
   if (auth.response) return auth.response;
 
   const supabase = getSupabaseAdmin();
   if (!supabase) {
-    return NextResponse.json({ tickets: MOCK_TICKETS });
+    return NextResponse.json({ error: 'Server configuration error.' }, { status: 500 });
   }
 
   try {
@@ -100,8 +100,8 @@ export async function GET(request: Request) {
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.warn('Supabase tickets query warning:', error.message);
-      return NextResponse.json({ tickets: MOCK_TICKETS });
+      console.error('Supabase tickets query error:', error.message);
+      return NextResponse.json({ error: 'Could not load tickets.' }, { status: 500 });
     }
 
     // Never seed placeholder tickets into the database: an empty table means no incidents yet
@@ -125,7 +125,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ tickets });
   } catch (err: any) {
     console.error('Error fetching tickets:', err);
-    return NextResponse.json({ tickets: MOCK_TICKETS });
+    return NextResponse.json({ error: 'Could not load tickets.' }, { status: 500 });
   }
 }
 
