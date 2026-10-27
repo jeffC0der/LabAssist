@@ -479,3 +479,12 @@ html.light [data-kpi="ONLINE"] { background-color: rgb(236 253 245 / 0.8); opaci
 html.light [data-kpi="OCCUPIED"] { background-color: rgb(238 242 255 / 0.8); opacity: 1; }
 html.light [data-kpi="ISSUE_REPORTED"] { background-color: rgb(255 251 235 / 0.85); opacity: 1; }
 html.light [data-kpi="UNDER_REPAIR"] { background-color: rgb(255 241 242 / 0.85); opacity: 1; }
+
+/* ── Pop-ups (full-screen overlays) ──
+   Centered when they fit; when taller than the window (a long invoice, a receipt, many line items) they
+   start at the top and scroll, instead of being pushed off-screen where their top can't be reached. */
+.fixed.inset-0.items-center {
+  align-items: safe center;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}

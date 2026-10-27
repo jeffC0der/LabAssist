@@ -41,13 +41,14 @@ export default function Header() {
   const { notifications, unreadCount, markRead, markAllRead, refreshNotifications } = useNotifications();
   const latestNotifications = notifications.slice(0, 5);
 
-  // Students can open the full list / the related section in the portal
+  // Open the full notifications list (every role) or, for students, the section a notification links to
+  const portalPath = role === 'ADMIN' ? '/admin' : role === 'TECHNICIAN' ? '/technician' : '/student';
   const openPortalTab = (tab: string) => {
     setNotifOpen(false);
-    if (typeof window !== 'undefined' && window.location.pathname === '/student') {
+    if (typeof window !== 'undefined' && window.location.pathname === portalPath) {
       window.dispatchEvent(new CustomEvent(OPEN_PORTAL_TAB_EVENT, { detail: tab }));
     } else {
-      router.push(`/student?tab=${encodeURIComponent(tab)}`);
+      router.push(`${portalPath}?tab=${encodeURIComponent(tab)}`);
     }
   };
 
@@ -239,15 +240,13 @@ export default function Header() {
                   </div>
                 )}
 
-                {role === 'STUDENT' && (
-                  <button
-                    type="button"
-                    onClick={() => openPortalTab('NOTIFICATIONS')}
-                    className="mt-1.5 w-full py-2 rounded-lg text-xs font-semibold text-indigo-300 bg-slate-800/60 hover:bg-slate-700/60 transition-colors"
-                  >
-                    Show All Notifications
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => openPortalTab('NOTIFICATIONS')}
+                  className="mt-1.5 w-full py-2 rounded-lg text-xs font-semibold text-indigo-300 bg-slate-800/60 hover:bg-slate-700/60 transition-colors"
+                >
+                  Show All Notifications
+                </button>
               </div>
             )}
           </div>
@@ -324,6 +323,26 @@ export default function Header() {
                       <span>Admin Console</span>
                     </Link>
                   )}
+
+                  {/* Full notifications list (every role) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDropdownOpen(false);
+                      openPortalTab('NOTIFICATIONS');
+                    }}
+                    className="w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-slate-700/60 transition-colors"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <Bell size={13} className="text-rose-400" />
+                      <span>Notifications</span>
+                    </span>
+                    {unreadCount > 0 && (
+                      <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-[10px] font-bold text-white flex items-center justify-center">
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                      </span>
+                    )}
+                  </button>
 
                   {/* Account & Security Settings Tab / Modal Trigger */}
                   <button

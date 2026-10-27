@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Shield, Key, Check, Plus, Search, Copy, Lock, RefreshCw, X,
+  Shield, Check, Plus, Search, Copy, Lock, RefreshCw, X,
   Wrench, ArrowUpRight, ArrowDownRight, Loader2, AlertCircle, Mail, Trash2, UserCheck, Terminal,
 } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
@@ -63,12 +63,6 @@ export default function UserAccessControl() {
   const [isAddingTech, setIsAddingTech] = useState(false);
   const [sqlCopied, setSqlCopied] = useState(false);
 
-  // ── Onboarding Passcode ──────────────────────────────────────────────────────
-  const [isPasscodeModalOpen, setIsPasscodeModalOpen] = useState(false);
-  const [passcodeDept, setPasscodeDept] = useState('Hardware Maintenance Div.');
-  const [passcodeExpiry, setPasscodeExpiry] = useState('48 Hours');
-  const [generatedPasscode, setGeneratedPasscode] = useState<string | null>(null);
-  const [hasCopied, setHasCopied] = useState(false);
 
   // ── Fetch Users ──────────────────────────────────────────────────────────────
   const fetchUsers = useCallback(async () => {
@@ -191,22 +185,6 @@ export default function UserAccessControl() {
     setTimeout(() => setSqlCopied(false), 3000);
   };
 
-  // ── Passcode ─────────────────────────────────────────────────────────────────
-  const handleGeneratePasscode = () => {
-    const hex = Math.random().toString(36).substring(2, 6).toUpperCase();
-    const num = Math.floor(1000 + Math.random() * 9000);
-    setGeneratedPasscode(`TECH-AUTH-${num}-${hex}`);
-    setHasCopied(false);
-  };
-
-  const handleCopyPasscode = () => {
-    if (!generatedPasscode) return;
-    navigator.clipboard.writeText(generatedPasscode);
-    setHasCopied(true);
-    toast.info('Passcode Copied', 'Copied to clipboard.');
-    setTimeout(() => setHasCopied(false), 2500);
-  };
-
   // ── Helpers ──────────────────────────────────────────────────────────────────
   const getRoleBadgeStyle = (role: UserRole) => {
     switch (role) {
@@ -276,7 +254,7 @@ export default function UserAccessControl() {
               <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
                 User Access &amp; Role-Based Control (RBAC)
                 <span className="px-2 py-0.5 text-[10px] uppercase font-mono font-bold tracking-wider rounded-md bg-violet-500/15 text-violet-300 border border-violet-500/30">
-                  Live Supabase Data
+                  Live
                 </span>
               </h2>
               <p className="text-xs text-slate-400">Manage verified accounts and assign Technician permissions directly in the database</p>
@@ -292,14 +270,6 @@ export default function UserAccessControl() {
             >
               <RefreshCw size={12} />
               <span>Refresh</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setIsPasscodeModalOpen(true); handleGeneratePasscode(); }}
-              className="flex items-center gap-2 py-2 px-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-all"
-            >
-              <Key size={14} />
-              <span>Generate Tech Passcode</span>
             </button>
           </div>
         </div>
@@ -542,89 +512,6 @@ export default function UserAccessControl() {
         )}
       </div>
 
-      {/* ── Passcode Modal ────────────────────────────────────────────────────── */}
-      {isPasscodeModalOpen && (
-        <ModalPortal>
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
-          onClick={() => setIsPasscodeModalOpen(false)}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div
-            className="w-full max-w-lg bg-slate-900 border border-slate-700/80 rounded-2xl p-6 shadow-2xl space-y-5 animate-scale-up"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center text-violet-400 shadow-[0_0_15px_rgba(139,92,246,0.3)]">
-                  <Key size={20} />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-100">Generate Technician Passcode</h3>
-                  <p className="text-xs text-slate-400">Single-use onboarding key for field IT personnel</p>
-                </div>
-              </div>
-              <button type="button" onClick={() => setIsPasscodeModalOpen(false)} className="text-slate-400 hover:text-slate-50 p-1">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-4 rounded-xl bg-slate-950 border border-violet-500/40 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold text-violet-400 uppercase tracking-wider flex items-center gap-1">
-                  <Lock size={12} /> Authorization Token
-                </span>
-                <button type="button" onClick={handleGeneratePasscode} className="text-[11px] text-slate-400 hover:text-slate-200 flex items-center gap-1">
-                  <RefreshCw size={11} /> Regenerate
-                </button>
-              </div>
-              <div className="flex items-center justify-between gap-3 bg-slate-900/90 p-3 rounded-lg border border-slate-800">
-                <code className="font-mono text-base font-bold text-emerald-400 tracking-wider">
-                  {generatedPasscode || 'TECH-AUTH-8891-K7X2'}
-                </code>
-                <button
-                  type="button"
-                  onClick={handleCopyPasscode}
-                  className="py-1.5 px-3 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                >
-                  {hasCopied ? <Check size={14} className="text-emerald-300" /> : <Copy size={14} />}
-                  <span>{hasCopied ? 'Copied' : 'Copy'}</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <label className="block text-slate-400 font-semibold mb-1">Target Department</label>
-                <select value={passcodeDept} onChange={(e) => setPasscodeDept(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 focus:outline-none">
-                  <option>Hardware Maintenance Div.</option>
-                  <option>Network &amp; Lab Ops</option>
-                  <option>Campus IT Services</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-slate-400 font-semibold mb-1">Passcode Expiration</label>
-                <select value={passcodeExpiry} onChange={(e) => setPasscodeExpiry(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 focus:outline-none">
-                  <option>24 Hours</option>
-                  <option>48 Hours</option>
-                  <option>7 Days</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="pt-2 flex justify-end">
-              <button type="button" onClick={() => setIsPasscodeModalOpen(false)}
-                className="py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors">
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-        </ModalPortal>
-      )}
     </div>
   );
 }

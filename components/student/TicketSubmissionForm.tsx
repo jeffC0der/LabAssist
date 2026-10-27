@@ -175,9 +175,6 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
 
     setIsSubmitting(true);
 
-    // Simulate realistic non-blocking dispatch latency
-    await new Promise(r => setTimeout(r, 650));
-
     const newTicketId = `TKT-${Math.floor(2400 + Math.random() * 900)}`;
     const newTicket: Ticket = {
       ticket_id: newTicketId,
@@ -215,9 +212,6 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
           <div>
             <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
               Manual Ticket Submission
-              <span className="px-2 py-0.5 text-[10px] uppercase font-mono font-bold tracking-wider rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                Instant Dispatch
-              </span>
             </h2>
             <p className="text-xs text-slate-400">
               Report equipment faults directly to campus IT response teams

@@ -257,7 +257,7 @@ export default function RevenueAnalytics() {
                 Revenue &amp; Income Analytics
                 <span className="px-2.5 py-0.5 text-[10px] uppercase font-mono font-bold tracking-wider rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5 shadow-[0_0_10px_rgba(16,185,129,0.15)]">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Supabase Live ({meta?.totalRecords || transactions.length} records)</span>
+                  <span>Live</span>
                 </span>
               </h2>
               <p className="text-xs text-slate-400">

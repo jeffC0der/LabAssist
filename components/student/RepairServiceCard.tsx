@@ -31,7 +31,6 @@ import {
   Calendar,
   MapPin,
   Lock,
-  Printer,
   X,
   ExternalLink,
   XCircle,
@@ -47,7 +46,12 @@ import { useRepairs, DeviceRepair, RepairStatus } from '@/context/RepairContext'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { REPAIR_FIELD_LIMITS } from '@/lib/repairLimits';
 import ModalPortal from '@/components/shared/ModalPortal';
-import { printReceipt } from '@/lib/printReceipt';
+import ReleaseReceiptModal from '@/components/repairs/ReleaseReceiptModal';
+import JobMaterials from '@/components/repairs/JobMaterials';
+import PhotoPicker, { type PickedPhoto } from '@/components/repairs/PhotoPicker';
+import RepairPhotoGallery from '@/components/repairs/RepairPhotoGallery';
+import { uploadRepairPhoto, type PhotoKind } from '@/lib/repairPhotos';
+import { buildReleaseReceipt, fetchRepairInvoice, type ReleaseReceiptData } from '@/lib/releaseReceipt';
 
 export interface RepairIntakeRequest {
   id: string;
@@ -212,6 +216,9 @@ export default function RepairServiceCard() {
   const [serialNumber, setSerialNumber] = useState<string>('');
   const [osSpecs, setOsSpecs] = useState<string>('');
   const [reportedIssue, setReportedIssue] = useState<string>('');
+  // Optional photos (uploaded after the intake is saved)
+  const [issuePhotos, setIssuePhotos] = useState<PickedPhoto[]>([]);
+  const [conditionPhotos, setConditionPhotos] = useState<PickedPhoto[]>([]);
 
   // Physical & Pre-Diagnostic Inspection Checklist
   const [scratchesDents, setScratchesDents] = useState<boolean>(false);
@@ -231,7 +238,38 @@ export default function RepairServiceCard() {
 
   // Customer Modals (Invoice & Final Receipt Viewers)
   const [customerInvoiceModalTarget, setCustomerInvoiceModalTarget] = useState<DeviceRepair | null>(null);
-  const [customerReceiptModalTarget, setCustomerReceiptModalTarget] = useState<DeviceRepair | null>(null);
+  const [customerReceipt, setCustomerReceipt] = useState<ReleaseReceiptData | null>(null);
+  // Which tab each opened job card shows
+  const [jobTabs, setJobTabs] = useState<Record<string, 'OVERVIEW' | 'DEVICE' | 'BILLING'>>({});
+  const jobTab = (id: string) => jobTabs[id] || 'OVERVIEW';
+
+  /** One plain sentence on what happens next for this job, plus the button that helps (if any). */
+  const studentNextStep = (req: DeviceRepair): { text: string; action?: { label: string; run: () => void } } => {
+    const total = Number(req.billing?.totalAmount || 0);
+    const paid = Number(req.billing?.amountPaid || 0);
+    const peso = (n: number) => `₱${n.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+    if (req.status === 'CANCELLED') return { text: 'This request was cancelled. The reason is shown below.' };
+    if (req.status === 'COMPLETED') return { text: 'Your device was released. You can view or print your receipt.', action: { label: 'View receipt', run: () => openCustomerReceipt(req) } };
+    if (req.status === 'READY_FOR_PICKUP') {
+      const where = req.pickupLocation || req.evaluation?.confirmedLocation || 'the repair counter';
+      return {
+        text: total > paid ? `Ready for pickup at ${where}. Please pay ${peso(total - paid)} when you collect it.` : `Ready for pickup at ${where}.`,
+        action: total > 0 ? { label: 'View invoice', run: () => setCustomerInvoiceModalTarget(req) } : undefined,
+      };
+    }
+    if (['RECEIVED', 'PENDING_EVALUATION', 'UNDER_EVALUATION', 'EVALUATED'].includes(req.status))
+      return { text: "A technician is checking your request. You'll be notified when your appointment is set." };
+    if (req.status === 'CONFIRMED' && req.evaluation?.confirmedDate)
+      return { text: `Bring your device on ${req.evaluation.confirmedDate} at ${req.evaluation.confirmedTime || '—'}, ${req.evaluation.confirmedLocation || 'the repair room'}.` };
+    return {
+      text: "Your device is being repaired. You'll be notified when it's ready for pickup.",
+      action: total > 0 ? { label: 'View invoice', run: () => setCustomerInvoiceModalTarget(req) } : undefined,
+    };
+  };
+  const openCustomerReceipt = async (req: DeviceRepair) => {
+    const invoice = await fetchRepairInvoice(req.id);
+    setCustomerReceipt(buildReleaseReceipt(req, invoice));
+  };
 
   // Filtered repair logs: Strictly exclusive to the logged-in user account for students/faculty
   const isPrivilegedUser = user?.role === 'TECHNICIAN' || user?.role === 'ADMIN';
@@ -318,9 +356,26 @@ export default function RepairServiceCard() {
       userId: user?.id,
     });
 
-    setIsSubmitting(false);
-
     if (result) {
+      // Photos are attached after the repair exists (they belong to its job order number)
+      const queued: Array<{ kind: PhotoKind; photo: PickedPhoto }> = [
+        ...issuePhotos.map((photo) => ({ kind: 'ISSUE' as PhotoKind, photo })),
+        ...conditionPhotos.map((photo) => ({ kind: 'CONDITION' as PhotoKind, photo })),
+      ];
+      let failed = 0;
+      let firstError = '';
+      for (const { kind, photo } of queued) {
+        try {
+          await uploadRepairPhoto(result.id, kind, photo.blob);
+        } catch (err: any) {
+          failed += 1;
+          firstError ||= err.message;
+        }
+      }
+      setIsSubmitting(false);
+      if (failed > 0) {
+        toast.warning('Some photos were not attached', `${failed} of ${queued.length} could not be uploaded. ${firstError}`);
+      }
       toast.success(
         'Intake Confirmed & Receipt Dispatched!',
         `Job Order No: ${result.id}. An official confirmation has been dispatched to ${result.clientEmail} via Brevo.`
@@ -329,6 +384,7 @@ export default function RepairServiceCard() {
       setActiveSubTab('ACTIVE_REPAIRS');
       setExpandedRepairId(result.id);
     } else {
+      setIsSubmitting(false);
       toast.error('Submission Failed', 'Could not save repair intake. Please try again.');
     }
   };
@@ -343,6 +399,9 @@ export default function RepairServiceCard() {
     setScreenDamageDeadPixels(false);
     setLiquidDamageIndicators(false);
     setAdditionalNotes('');
+    [...issuePhotos, ...conditionPhotos].forEach((p) => URL.revokeObjectURL(p.previewUrl));
+    setIssuePhotos([]);
+    setConditionPhotos([]);
   };
 
   return (
@@ -390,7 +449,7 @@ export default function RepairServiceCard() {
       {activeSubTab === 'INTAKE_FORM' ? (
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* ────────────────────────────────────────────────────────── */}
-          {/* 1. Client & Device Intake Profile (Header Card)           */}
+          {/* 1. Client & Device Intake Profile                         */}
           {/* ────────────────────────────────────────────────────────── */}
           <div className="glass rounded-2xl p-5 sm:p-6 border border-slate-800/80 space-y-6 shadow-card">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800/70">
@@ -401,16 +460,10 @@ export default function RepairServiceCard() {
                 <div>
                   <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
                     1. Client & Device Intake Profile
-                    <span className="px-2 py-0.5 text-[10px] uppercase font-mono font-bold tracking-wider rounded-md bg-violet-500/15 text-violet-300 border border-violet-500/30">
-                      Header Card
-                    </span>
                   </h3>
                 </div>
               </div>
 
-              <span className="text-[11px] font-mono text-slate-500 hidden sm:inline-block">
-                Auto-synced with UMak Account
-              </span>
             </div>
 
             {/* Client Information Section */}
@@ -566,6 +619,15 @@ export default function RepairServiceCard() {
                 }`}>
                   {reportedIssue.length} / {REPAIR_FIELD_LIMITS.reportedIssue} characters
                 </p>
+                <div className="mt-3">
+                  <PhotoPicker
+                    label="Photos of the problem"
+                    hint="For example the error on screen, the broken part, or the damage."
+                    photos={issuePhotos}
+                    onChange={setIssuePhotos}
+                    disabled={isSubmitting}
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -582,17 +644,10 @@ export default function RepairServiceCard() {
                 <div>
                   <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
                     2. Physical & Pre-Diagnostic Intake Inspection
-                    <span className="px-2 py-0.5 text-[10px] uppercase font-mono font-bold tracking-wider rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                      Dispute Protection
-                    </span>
                   </h3>
                 </div>
               </div>
 
-              <span className="text-amber-400/80 text-xs font-mono hidden sm:flex items-center gap-1">
-                <AlertTriangle size={13} />
-                Intake Audit
-              </span>
             </div>
 
             {/* Checklist Grid */}
@@ -703,13 +758,21 @@ export default function RepairServiceCard() {
                   {additionalNotes.length} / {REPAIR_FIELD_LIMITS.additionalInspectionNotes} characters
                 </p>
             </div>
+
+            <PhotoPicker
+              label="Photos of the device's condition"
+              hint="Scratches, dents, cracks or anything already damaged before the repair. This protects you if there is a dispute later."
+              photos={conditionPhotos}
+              onChange={setConditionPhotos}
+              disabled={isSubmitting}
+            />
           </div>
 
           {/* Form Action Controls */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-slate-900/80 border border-slate-800/80">
             <div className="flex items-center gap-2 text-xs text-slate-400">
               <ShieldCheck size={16} className="text-emerald-400 flex-shrink-0" />
-              <span>Campus IT Repair Center · Official RMA Intake Agreement Generated Upon Submit</span>
+              <span>An intake receipt will be emailed to you after you submit.</span>
             </div>
 
             <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -914,7 +977,40 @@ export default function RepairServiceCard() {
 
                       {/* ── Collapsible Body Content ── */}
                       {isExpanded && (
-                        <div className="p-5 sm:p-6 space-y-5 bg-slate-950/50 animate-fade-in">
+                        <div className="p-5 sm:p-6 space-y-5 bg-slate-950/50">
+                          {(() => {
+                            const next = studentNextStep(req);
+                            return (
+                              <div className="space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30">
+                                  <p className="text-xs text-slate-200"><strong className="text-indigo-300">Next:</strong> {next.text}</p>
+                                  {next.action && (
+                                    <button type="button" onClick={next.action.run} className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">
+                                      {next.action.label}
+                                    </button>
+                                  )}
+                                </div>
+                                <div role="tablist" aria-label="Repair details" className="flex gap-1 overflow-x-auto">
+                                  {([['OVERVIEW', 'Overview'], ['DEVICE', 'My Device'], ['BILLING', 'Billing & Receipt']] as const).map(([id, label]) => (
+                                    <button
+                                      key={id}
+                                      type="button"
+                                      role="tab"
+                                      aria-selected={jobTab(req.id) === id}
+                                      onClick={() => setJobTabs((t) => ({ ...t, [req.id]: id }))}
+                                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+                                        jobTab(req.id) === id ? 'bg-slate-800 text-slate-50 border border-slate-600' : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                                      }`}
+                                    >
+                                      {label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {jobTab(req.id) === 'OVERVIEW' && (<>
                           {/* 2. Customer Repair Lifecycle Stepper (7 Stages: Evaluation → Confirmed → Diagnostics → Awaiting Parts → In Progress → Ready for Pickup → Completed) */}
                           {isCancelled ? (
                             <div className="p-3.5 rounded-xl bg-rose-950/40 border border-rose-500/40 text-xs flex items-center justify-between">
@@ -1046,7 +1142,7 @@ export default function RepairServiceCard() {
                               <div className="flex items-center justify-end pt-2 border-t border-emerald-500/20">
                                 <button
                                   type="button"
-                                  onClick={() => setCustomerReceiptModalTarget(req)}
+                                  onClick={() => openCustomerReceipt(req)}
                                   className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition-all shadow-glow-emerald flex items-center gap-1.5"
                                 >
                                   <Receipt size={14} />
@@ -1208,6 +1304,14 @@ export default function RepairServiceCard() {
                             );
                           })()}
 
+                          </>)}
+
+                          {jobTab(req.id) === 'BILLING' && (<>
+                          {!(req.billing?.totalAmount && req.billing.totalAmount > 0) && req.status !== 'COMPLETED' && (
+                            <p className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 text-xs text-slate-400">
+                              No invoice yet. The technician adds the parts and labor after checking your device; you'll be notified when it's ready.
+                            </p>
+                          )}
                           {/* E. Dedicated Billing & Invoice Overview */}
                           {req.billing?.totalAmount !== undefined && req.billing.totalAmount > 0 && (
                             <div className="p-4 rounded-xl bg-slate-950/80 border border-emerald-500/30 space-y-2.5 text-xs">
@@ -1293,6 +1397,22 @@ export default function RepairServiceCard() {
                             </div>
                           )}
 
+                          {(req.status === 'COMPLETED' || (req.billing?.totalAmount || 0) > 0) && (
+                            <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800">
+                              <JobMaterials jobOrderNumber={req.id} partsNote={req.partsReplaced} />
+                            </div>
+                          )}
+                          {req.status === 'COMPLETED' && (
+                            <div className="flex justify-end">
+                              <button type="button" onClick={() => openCustomerReceipt(req)} className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5">
+                                <Receipt size={14} />
+                                <span>View Official Release Receipt</span>
+                              </button>
+                            </div>
+                          )}
+                          </>)}
+
+                          {jobTab(req.id) === 'DEVICE' && (<>
                           {/* F. Specs & Reported Issue Box */}
                           <div className="grid grid-cols-1 md:grid-cols-12 gap-3 text-xs bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/60">
                             <div className="md:col-span-4 space-y-1">
@@ -1334,10 +1454,16 @@ export default function RepairServiceCard() {
                               !req.inspectionNotes.screenDamageDeadPixels &&
                               !req.inspectionNotes.liquidDamageIndicators && (
                                 <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-                                  Pristine Physical Condition
+                                  No visible damage
                                 </span>
                               )}
                           </div>
+                          {/* Photos the client attached at intake */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-900/60 border border-slate-800">
+                            <RepairPhotoGallery rma={req.id} kind="ISSUE" title="Photos of the problem" />
+                            <RepairPhotoGallery rma={req.id} kind="CONDITION" title="Photos of the device's condition" />
+                          </div>
+                          </>)}
                         </div>
                       )}
                     </div>
@@ -1353,7 +1479,7 @@ export default function RepairServiceCard() {
       {customerInvoiceModalTarget && (
         <ModalPortal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
-          <div data-print-root className="w-full max-w-2xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/40 shadow-2xl p-6 sm:p-7 space-y-5">
+          <div className="w-full max-w-2xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/40 shadow-2xl p-6 sm:p-7 space-y-5">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
@@ -1392,22 +1518,9 @@ export default function RepairServiceCard() {
                 </div>
               </div>
 
-              {/* Billing Itemization */}
-              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-                <span className="text-[11px] font-bold text-slate-400 uppercase font-mono block">
-                  Service Work Scope:
-                </span>
-                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex justify-between items-center text-xs">
-                  <div>
-                    <strong className="text-slate-200 block">Diagnostics &amp; Repair Servicing</strong>
-                    <span className="text-[11px] text-slate-400 font-mono">
-                      {customerInvoiceModalTarget.partsReplaced || customerInvoiceModalTarget.reportedIssue}
-                    </span>
-                  </div>
-                  <strong className="text-emerald-400 font-mono text-sm">
-                    ₱{(customerInvoiceModalTarget.billing?.totalAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </strong>
-                </div>
+              {/* Materials, parts and labor billed */}
+              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
+                <JobMaterials jobOrderNumber={customerInvoiceModalTarget.id} partsNote={customerInvoiceModalTarget.partsReplaced} />
               </div>
 
               {/* Settlement Summary */}
@@ -1446,15 +1559,6 @@ export default function RepairServiceCard() {
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
               <button
                 type="button"
-                onClick={(e) => printReceipt(e.currentTarget, `Invoice ${customerInvoiceModalTarget.id}`)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5"
-                title="Print, or choose Save as PDF in the print window"
-              >
-                <Printer size={13} className="text-emerald-400" />
-                <span>Print / Save PDF</span>
-              </button>
-              <button
-                type="button"
                 onClick={() => setCustomerInvoiceModalTarget(null)}
                 className="px-5 py-2 rounded-xl text-xs font-bold text-slate-50 bg-slate-800 hover:bg-slate-700 border border-slate-700"
               >
@@ -1466,100 +1570,8 @@ export default function RepairServiceCard() {
         </ModalPortal>
       )}
 
-      {/* ── CUSTOMER RELEASE RECEIPT MODAL ── */}
-      {customerReceiptModalTarget && (
-        <ModalPortal>
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
-          <div data-print-root className="w-full max-w-2xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/50 shadow-2xl p-6 sm:p-7 space-y-5">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
-                  <Receipt size={18} />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-100">Official Device Release Receipt</h3>
-                  <p className="text-xs text-slate-400 font-mono">
-                    Job Order: <span className="text-cyan-300 font-bold">{customerReceiptModalTarget.id}</span>
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={(e) => printReceipt(e.currentTarget, "Release Receipt")}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm"
-                >
-                  <Printer size={13} className="text-emerald-400" />
-                  <span>Print / Save PDF</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCustomerReceiptModalTarget(null)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-4 text-xs">
-              {/* Status Header */}
-              <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-200 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 size={16} className="text-emerald-400" />
-                  <span className="font-semibold">Device Released &amp; Handover Completed</span>
-                </div>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  PAID IN FULL
-                </span>
-              </div>
-
-              {/* Handover & Particulars */}
-              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2 font-mono text-[11px]">
-                <div className="flex justify-between">
-                  <span className="text-slate-400 font-sans">Device Released To:</span>
-                  <strong className="text-emerald-300 font-sans font-bold">
-                    {customerReceiptModalTarget.deviceReleasedTo || customerReceiptModalTarget.completion?.deviceReleasedTo || customerReceiptModalTarget.clientName}
-                  </strong>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400 font-sans">Handover Date:</span>
-                  <span className="text-slate-200">
-                    {(customerReceiptModalTarget.completedAt || customerReceiptModalTarget.completion?.completedAt)
-                      ? new Date(customerReceiptModalTarget.completedAt || customerReceiptModalTarget.completion!.completedAt!).toLocaleString()
-                      : new Date().toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400 font-sans">Device Model:</span>
-                  <strong className="text-slate-200">{customerReceiptModalTarget.deviceModel}</strong>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400 font-sans">Serial Number:</span>
-                  <span className="text-cyan-300">{customerReceiptModalTarget.serialNumber}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400 font-sans">Total Amount Settled:</span>
-                  <strong className="text-emerald-400 text-sm font-bold">
-                    ₱{(customerReceiptModalTarget.billing?.totalAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </strong>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => setCustomerReceiptModalTarget(null)}
-                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 shadow-glow-emerald"
-              >
-                Close Receipt
-              </button>
-            </div>
-          </div>
-        </div>
-        </ModalPortal>
-      )}
+      {/* ── CUSTOMER RELEASE RECEIPT (the same receipt technicians issue) ── */}
+      {customerReceipt && <ReleaseReceiptModal receipt={customerReceipt} onClose={() => setCustomerReceipt(null)} />}
     </div>
   );
 }

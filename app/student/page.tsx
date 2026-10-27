@@ -46,7 +46,7 @@ export default function StudentPage() {
 
         {/* Global Footer */}
         <div className="mt-12 pt-4 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-600">
-          <span>LabAssist Student Portal · IoT Campus Network</span>
+          <span>UMak LabAssist · University of Makati</span>
           <span className="flex items-center gap-1.5 font-mono text-slate-500">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
             Hardware Remote Keys A–D Live

@@ -31,7 +31,6 @@ export type StudentNavTab = 'PC_STATION' | 'SUBMIT_TICKET' | 'HARDWARE_RENT' | '
 interface TabConfig {
   id: StudentNavTab;
   label: string;
-  sublabel: string;
   icon: React.ReactNode;
   activeColor: string;
   badge?: (props: { activeTicketCount: number; onlinePcCount: number; unreadNotificationCount: number }) => React.ReactNode;
@@ -41,7 +40,6 @@ const NAV_TABS: TabConfig[] = [
   {
     id: 'PC_STATION',
     label: 'PC Station',
-    sublabel: 'Live Lab Map & Station Monitor',
     icon: <Monitor size={18} />,
     activeColor: 'from-cyan-500/20 to-blue-500/10 border-cyan-500/40 text-cyan-300',
     badge: ({ onlinePcCount }) => (
@@ -54,7 +52,6 @@ const NAV_TABS: TabConfig[] = [
   {
     id: 'SUBMIT_TICKET',
     label: 'Submit a ticket',
-    sublabel: 'Manual Ticket & My Tickets Tracker',
     icon: <TicketIcon size={18} />,
     activeColor: 'from-indigo-500/20 to-purple-500/10 border-indigo-500/40 text-indigo-300',
     badge: ({ activeTicketCount }) => (
@@ -66,7 +63,6 @@ const NAV_TABS: TabConfig[] = [
   {
     id: 'HARDWARE_RENT',
     label: 'Hardware Rent',
-    sublabel: 'Smart Locker Dev Kit Checkout',
     icon: <Cpu size={18} />,
     activeColor: 'from-amber-500/20 to-orange-500/10 border-amber-500/40 text-amber-300',
     badge: () => (
@@ -78,7 +74,6 @@ const NAV_TABS: TabConfig[] = [
   {
     id: 'REPAIR_SERVICE',
     label: 'Repair Service',
-    sublabel: 'Device Intake & Diagnostic Profile',
     icon: <Wrench size={18} />,
     activeColor: 'from-violet-500/20 to-indigo-500/10 border-violet-500/40 text-violet-300',
     badge: () => (
@@ -90,7 +85,6 @@ const NAV_TABS: TabConfig[] = [
   {
     id: 'NOTIFICATIONS',
     label: 'Notifications',
-    sublabel: 'Updates on Your Reports & Repairs',
     icon: <Bell size={18} />,
     activeColor: 'from-rose-500/20 to-indigo-500/10 border-rose-500/40 text-rose-300',
     badge: ({ unreadNotificationCount }) => (
@@ -211,7 +205,7 @@ export default function StudentPortal() {
 
             {/* Navigation Tabs (Vertical on lg+, Horizontal row on mobile) */}
             <nav className="mt-3 flex flex-row lg:flex-col gap-2" aria-label="Student Portal Sections">
-              {NAV_TABS.map((tab) => {
+              {NAV_TABS.filter((tab) => tab.id !== 'NOTIFICATIONS').map((tab) => {
                 const isActive = activeTab === tab.id;
                 return (
                   <button
@@ -234,16 +228,9 @@ export default function StudentPortal() {
                       >
                         {tab.icon}
                       </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-sm font-bold truncate ${isActive ? 'text-slate-50' : 'text-slate-200'}`}>
-                            {tab.label}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-400 truncate hidden sm:block">
-                          {tab.sublabel}
-                        </p>
-                      </div>
+                      <span className={`min-w-0 text-sm font-bold truncate ${isActive ? 'text-slate-50' : 'text-slate-200'}`}>
+                        {tab.label}
+                      </span>
                     </div>
 
                     <div className="flex items-center gap-2 pl-2 flex-shrink-0">
@@ -282,9 +269,6 @@ export default function StudentPortal() {
 
             {selectedStation ? (
               <div className="space-y-2">
-                <p className="text-slate-400 text-[11px]">
-                  Station selected for rapid diagnosis and ticket pre-filling.
-                </p>
                 {activeTab !== 'SUBMIT_TICKET' && (() => {
                   const activeTkt = tickets.find(
                     (t) =>

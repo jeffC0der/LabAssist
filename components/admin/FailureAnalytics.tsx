@@ -314,7 +314,7 @@ export default function FailureAnalytics() {
                 </span>
               ) : (
                 <span className="px-2 py-0.5 text-[10px] uppercase font-mono font-bold tracking-wider rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                  <Sparkles size={10} /> Live Supabase Data
+                  <Sparkles size={10} /> Live
                 </span>
               )}
             </h2>

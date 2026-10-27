@@ -4,7 +4,7 @@
 // with the page's styles, turn it into black text on white paper, and print only that.
 
 const PRINT_CSS = `
-  @page { size: auto; margin: 12mm; }
+  @page { size: auto; margin: 10mm; }
   html, body { background: #fff !important; margin: 0; padding: 0; }
   body { font-family: Inter, system-ui, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .print-root, .print-root * {
@@ -19,12 +19,33 @@ const PRINT_CSS = `
     animation: none !important;
     transition: none !important;
   }
-  .print-root { width: 100% !important; max-width: 760px !important; margin: 0 auto !important; border: 1px solid #d1d5db !important; border-radius: 12px; }
+  .print-root { width: 100% !important; max-width: none !important; margin: 0 !important; padding: 16px 18px !important; border: 1px solid #d1d5db !important; border-radius: 12px; }
+  /* Paper copy: tighter spacing than on screen so a receipt fits on one page */
+  .print-root [class*="space-y-"] > :not([hidden]) ~ :not([hidden]) { margin-top: 10px !important; }
+  .print-root .p-4, .print-root .p-3.5, .print-root .p-3 { padding: 8px 10px !important; }
+  .print-root .pb-5, .print-root .pb-4 { padding-bottom: 8px !important; }
+  .print-root .pt-3 { padding-top: 6px !important; }
+  .print-root .my-8 { margin-top: 0 !important; margin-bottom: 0 !important; }
   .print-root .text-slate-500, .print-root .text-slate-400 { color: #4b5563 !important; }
   .print-root table { width: 100%; border-collapse: collapse; }
   .print-root tr, .print-root section, .print-root .rounded-xl { break-inside: avoid; }
   .print-root img { max-width: 100%; }
 `;
+
+// Printable area of Letter paper with 10 mm margins (the smaller of Letter and A4), in CSS pixels
+const PAGE_WIDTH_PX = 740;
+const PAGE_HEIGHT_PX = 960;
+
+/** Shrink the receipt (never enlarge) so it prints on a single page. */
+function fitToOnePage(doc: Document) {
+  const root = doc.querySelector<HTMLElement>('.print-root');
+  if (!root) return;
+  const height = root.getBoundingClientRect().height;
+  if (height > PAGE_HEIGHT_PX) {
+    const scale = Math.max(0.5, (PAGE_HEIGHT_PX - 4) / height);
+    root.style.setProperty('zoom', String(scale));
+  }
+}
 
 export function printReceipt(trigger: HTMLElement, title = 'UMakLabAssist Receipt') {
   const root = trigger.closest<HTMLElement>('[data-print-root]');
@@ -40,7 +61,8 @@ export function printReceipt(trigger: HTMLElement, title = 'UMakLabAssist Receip
 
   const iframe = document.createElement('iframe');
   iframe.setAttribute('aria-hidden', 'true');
-  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+  // Off-screen at the printable width of Letter/A4 paper (~740 px), so the receipt can be measured
+  iframe.style.cssText = `position:fixed;left:-10000px;top:0;width:${PAGE_WIDTH_PX}px;height:${PAGE_HEIGHT_PX}px;border:0;visibility:hidden;`;
   document.body.appendChild(iframe);
 
   const doc = iframe.contentDocument;
@@ -67,6 +89,7 @@ export function printReceipt(trigger: HTMLElement, title = 'UMakLabAssist Receip
   const doPrint = () => {
     if (printed) return;
     printed = true;
+    fitToOnePage(doc);
     win.focus();
     win.print();
     cleanup();

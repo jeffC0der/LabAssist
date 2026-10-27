@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Wrench,
   Laptop,
@@ -50,6 +50,11 @@ import { useRepairs, DeviceRepair, RepairStatus } from '@/context/RepairContext'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import ModalPortal from '@/components/shared/ModalPortal';
 import { printReceipt } from '@/lib/printReceipt';
+import ReleaseReceiptModal from '@/components/repairs/ReleaseReceiptModal';
+import JobMaterials from '@/components/repairs/JobMaterials';
+import RepairPhotoGallery from '@/components/repairs/RepairPhotoGallery';
+import { WORK_SCOPE_MAX, defaultWorkScope } from '@/lib/repairLimits';
+import { buildReleaseReceipt, fetchRepairInvoice, type ReleaseReceiptData } from '@/lib/releaseReceipt';
 
 const LAB_ROOM_OPTIONS = [
   { code: 'LAB-101', name: 'Embedded Systems & IoT Lab (1st Floor)' },
@@ -78,6 +83,8 @@ const isPastAppointment = (date: string, time: string) => {
   return isNaN(when.getTime()) || when.getTime() < Date.now() - 60 * 1000;
 };
 
+type DetailTab = 'OVERVIEW' | 'DEVICE' | 'EVALUATION' | 'WORK' | 'BILLING';
+
 export default function TechnicianRepairsWorkbench() {
   const { user } = useAuth();
   const toast = useToast();
@@ -90,6 +97,17 @@ export default function TechnicianRepairsWorkbench() {
   const [deviceFilter, setDeviceFilter] = useState<'ALL' | 'PC' | 'Laptop'>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
+  // Tab inside the job detail panel
+  const [detailTab, setDetailTab] = useState<DetailTab>('OVERVIEW');
+  // Wide screens show the job list and the selected job side by side; narrow screens open it under its row
+  const [isWideLayout, setIsWideLayout] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1280px)');
+    const update = () => setIsWideLayout(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
 
   // Evaluation Form Drafting State (keyed by repair ID)
   const [evaluationForms, setEvaluationForms] = useState<
@@ -157,7 +175,7 @@ export default function TechnicianRepairsWorkbench() {
   const [isCheckingInvoice, setIsCheckingInvoice] = useState<string | null>(null);
 
   // ── Final Receipt Modal State ──
-  const [finalReceiptData, setFinalReceiptData] = useState<any | null>(null);
+  const [finalReceiptData, setFinalReceiptData] = useState<ReleaseReceiptData | null>(null);
 
   // Auto-initialize form draft for a job when expanded
   const getOrInitEvaluationForm = (job: DeviceRepair) => {
@@ -239,6 +257,18 @@ export default function TechnicianRepairsWorkbench() {
     return true;
   });
 
+  const selectedJob = filteredJobs.find((j) => j.id === expandedJobId) || null;
+  // Wide layout: always show a job (the first one when nothing valid is selected)
+  useEffect(() => {
+    if (isWideLayout && filteredJobs.length > 0 && !filteredJobs.some((j) => j.id === expandedJobId)) {
+      setExpandedJobId(filteredJobs[0].id);
+    }
+  }, [isWideLayout, filteredJobs, expandedJobId]);
+  // Each job opens on the tab that matters for its stage
+  useEffect(() => {
+    setDetailTab(activeWorkflowTab === 'EVALUATION' ? 'EVALUATION' : 'OVERVIEW');
+  }, [expandedJobId, activeWorkflowTab]);
+
   const laptopCount = activeDataset.filter((j) => j.deviceType === 'Laptop').length;
   const pcCount = activeDataset.filter((j) => j.deviceType === 'Desktop').length;
 
@@ -257,7 +287,7 @@ export default function TechnicianRepairsWorkbench() {
     }
 
     setIsConfirmingId(job.id);
-    const techName = user?.name || job.technicianAssigned || 'Tech. Alex Torres';
+    const techName = user?.name || job.technicianAssigned || 'Unassigned';
     const techId = user?.id || job.technicianId;
 
     const success = await updateRepair(job.id, {
@@ -437,10 +467,10 @@ export default function TechnicianRepairsWorkbench() {
         clientEmail: settlementModalTarget.clientEmail,
         deviceModel: settlementModalTarget.deviceModel,
         serialNumber: settlementModalTarget.serialNumber,
-        assignedTechnician: settlementModalTarget.technicianAssigned || user?.name || 'Tech. Alex Torres',
+        assignedTechnician: settlementModalTarget.technicianAssigned || user?.name || 'Unassigned',
         items: settlementInvoiceData?.items || [
           {
-            workScope: settlementModalTarget.reportedIssue ? `Diagnostics & Repair: ${settlementModalTarget.reportedIssue}` : 'Device Diagnostics & Service',
+            workScope: defaultWorkScope(settlementModalTarget.reportedIssue, 'Device Diagnostics & Service'),
             itemName: settlementModalTarget.partsReplaced || 'Standard Lab Service',
             quantity: 1,
             unitCost: totalAmt,
@@ -506,52 +536,9 @@ export default function TechnicianRepairsWorkbench() {
 
   // ── Action: Open & Trigger Final Release Receipt ──
   const handleOpenFinalReceipt = async (job: DeviceRepair) => {
-    let invoiceInfo: any = null;
-    try {
-      const res = await fetch(`/api/repairs/invoices?jobOrderNumber=${job.id}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.invoice) {
-          invoiceInfo = data.invoice;
-        }
-      }
-    } catch (e) {
-      console.warn('Could not fetch invoice for receipt:', e);
-    }
-
-    const receipt = {
-      jobOrderId: job.id,
-      invoiceId: invoiceInfo?.invoiceNumber || (job.billing?.totalAmount ? `INV-01-${job.id.replace(/[^0-9]/g, '').slice(-8) || '2026'}` : 'INV-STANDARD'),
-      clientName: job.clientName,
-      clientEmail: job.clientEmail,
-      clientPhone: job.clientPhone || 'N/A',
-      clientDepartment: job.clientDepartment || 'UMak CCIS',
-      deviceType: job.deviceType,
-      deviceModel: job.deviceModel,
-      serialNumber: job.serialNumber,
-      osSpecs: job.osSpecs || 'N/A',
-      reportedIssue: job.reportedIssue,
-      partsReplaced: job.partsReplaced || 'N/A',
-      deviceReleasedTo: job.completion?.deviceReleasedTo || job.deviceReleasedTo || job.clientName,
-      completedAt: job.completion?.completedAt || job.completedAt || new Date().toISOString(),
-      settlementDate: job.billing?.settlementDate || job.completion?.completedAt || job.completedAt || new Date().toISOString(),
-      technicianName: job.technicianAssigned || user?.name || 'Tech. Alex Torres',
-      paymentStatus: job.billing?.paymentStatus || invoiceInfo?.paymentStatus || 'PAID',
-      paymentMethod: job.billing?.paymentMethod || invoiceInfo?.paymentMethod || 'CASH',
-      totalAmount: Number(invoiceInfo?.totalAmount || job.billing?.totalAmount || 0),
-      amountPaid: Number(invoiceInfo?.amountPaid || job.billing?.amountPaid || job.billing?.totalAmount || 0),
-      onlinePaymentReference: invoiceInfo?.onlinePaymentReference || job.billing?.onlinePaymentReference,
-      items: invoiceInfo?.items || [
-        {
-          workScope: job.reportedIssue ? `Diagnostics & Repair: ${job.reportedIssue}` : 'Device Servicing & Diagnostics',
-          itemName: job.partsReplaced || 'Service Labor & Quality Assurance Test',
-          quantity: 1,
-          unitCost: Number(job.billing?.totalAmount || 0),
-        }
-      ],
-    };
-
-    setFinalReceiptData(receipt);
+    // Same receipt (and builder) the student sees, including the itemized materials from the invoice
+    const invoice = await fetchRepairInvoice(job.id);
+    setFinalReceiptData(buildReleaseReceipt(job, invoice, user?.name));
   };
 
   // ── Action: Confirm Device Release & Complete Job Order ──
@@ -715,7 +702,7 @@ export default function TechnicianRepairsWorkbench() {
     setBillingItems([
       {
         id: 'item-1',
-        workScope: job.reportedIssue ? `Diagnostics & Repair: ${job.reportedIssue}` : 'Diagnostic Bench Service & Labor',
+        workScope: defaultWorkScope(job.reportedIssue, 'Diagnostic Bench Service & Labor'),
         itemName: job.partsReplaced || '',
         quantity: 1,
         unitCost: job.billing?.totalAmount ? String(job.billing.totalAmount) : '500',
@@ -819,7 +806,7 @@ export default function TechnicianRepairsWorkbench() {
         clientEmail: billingTarget.clientEmail,
         deviceModel: billingTarget.deviceModel,
         serialNumber: billingTarget.serialNumber,
-        assignedTechnician: billingTarget.technicianAssigned || user?.name || 'Tech. Alex Torres',
+        assignedTechnician: billingTarget.technicianAssigned || user?.name || 'Unassigned',
         items: billingItems.map((it) => ({
           workScope: it.workScope.trim(),
           itemName: it.itemName.trim() || undefined,
@@ -907,7 +894,7 @@ export default function TechnicianRepairsWorkbench() {
       clientEmail: job.clientEmail,
       deviceModel: job.deviceModel,
       serialNumber: job.serialNumber,
-      assignedTechnician: job.technicianAssigned || 'Tech. Alex Torres',
+      assignedTechnician: job.technicianAssigned || user?.name || 'Unassigned',
       totalAmount: job.billing?.totalAmount || 0,
       amountPaid: job.billing?.amountPaid || 0,
       onlinePaymentReference: job.billing?.onlinePaymentReference || null,
@@ -915,7 +902,7 @@ export default function TechnicianRepairsWorkbench() {
       items: [
         {
           id: 'item-1',
-          workScope: job.reportedIssue ? `Diagnostics & Repair: ${job.reportedIssue}` : 'Bench Diagnostics & Service',
+          workScope: defaultWorkScope(job.reportedIssue, 'Bench Diagnostics & Service'),
           itemName: job.partsReplaced || 'Standard Lab Service',
           quantity: 1,
           unitCost: job.billing?.totalAmount || 0,
@@ -1002,6 +989,1040 @@ export default function TechnicianRepairsWorkbench() {
           </span>
         );
     }
+  };
+
+
+  // ── Job detail (list + detail layout): pinned header with the next step, then one tab at a time ──
+  const detailTabsFor = (): Array<{ id: DetailTab; label: string }> =>
+    activeWorkflowTab === 'EVALUATION'
+      ? [{ id: 'EVALUATION', label: 'Evaluation' }, { id: 'DEVICE', label: 'Device & Intake' }]
+      : activeWorkflowTab === 'CANCELLED'
+      ? [{ id: 'OVERVIEW', label: 'Overview' }, { id: 'DEVICE', label: 'Device & Intake' }]
+      : [
+          { id: 'OVERVIEW', label: 'Overview' },
+          { id: 'EVALUATION', label: 'Evaluation' },
+          { id: 'DEVICE', label: 'Device & Intake' },
+          { id: 'WORK', label: 'Work & Parts' },
+          { id: 'BILLING', label: 'Billing' },
+        ];
+
+  /** The one thing to do next on this job, with the button that does it. */
+  const nextStepFor = (job: DeviceRepair): { text: string; action?: { label: string; run: () => void } } => {
+    const total = Number(job.billing?.totalAmount || 0);
+    const paid = Number(job.billing?.amountPaid || 0);
+    if (job.status === 'CANCELLED') return { text: 'This job was cancelled. No further action needed.' };
+    if (activeWorkflowTab === 'EVALUATION')
+      return { text: 'Evaluate the device, set the appointment, then confirm the job order.', action: { label: 'Open evaluation', run: () => setDetailTab('EVALUATION') } };
+    if (job.status === 'COMPLETED')
+      return { text: `Completed and released to ${job.deviceReleasedTo || job.completion?.deviceReleasedTo || job.clientName}.`, action: { label: 'View receipt', run: () => handleOpenFinalReceipt(job) } };
+    if (job.status === 'READY_FOR_PICKUP')
+      return total > 0 && paid < total
+        ? { text: `Ready for pickup. Balance due: ₱${(total - paid).toLocaleString(undefined, { minimumFractionDigits: 2 })}.`, action: { label: 'Record payment & release', run: () => handleUpdateStatus(job.id, 'COMPLETED') } }
+        : { text: 'Ready for pickup. Hand the device over when the client arrives.', action: { label: 'Release device', run: () => handleUpdateStatus(job.id, 'COMPLETED') } };
+    if (total === 0)
+      return { text: 'Add the parts and labor to the invoice before the device can be released.', action: { label: 'Create invoice', run: () => handleOpenBillingModal(job) } };
+    if (job.status === 'REPAIR_IN_PROGRESS')
+      return { text: 'Repair in progress. Mark it ready when the device is fixed.', action: { label: 'Mark ready for pickup', run: () => handleUpdateStatus(job.id, 'READY_FOR_PICKUP') } };
+    return { text: `Current stage: ${job.status.replace(/_/g, ' ').toLowerCase()}. Update the progress as work continues.`, action: { label: 'Update progress', run: () => setDetailTab('WORK') } };
+  };
+
+  const renderJobDetail = (job: DeviceRepair) => {
+    const formState = evaluationForms[job.id] || getOrInitEvaluationForm(job);
+    const next = nextStepFor(job);
+    const total = Number(job.billing?.totalAmount || 0);
+    const paid = Number(job.billing?.amountPaid || 0);
+    return (
+      <div className="glass rounded-2xl border border-indigo-500/40 overflow-hidden shadow-card [overflow-wrap:anywhere]">
+        {/* Pinned header: what the job is and what to do next */}
+        <div className="p-4 sm:p-5 border-b border-slate-800/70 space-y-3 bg-slate-900/60">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-extrabold text-slate-100 text-base">{job.deviceModel}</span>
+                <span className="font-mono text-xs font-bold text-indigo-300 bg-indigo-500/15 px-2 py-0.5 rounded-md border border-indigo-500/30">{job.id}</span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {job.clientName} · {job.deviceType} · S/N {job.serialNumber}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {getStatusBadge(job.status)}
+              {!isWideLayout && (
+                <button type="button" onClick={() => setExpandedJobId(null)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800" aria-label="Close job details">
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30">
+            <p className="text-xs text-slate-200 flex items-center gap-1.5">
+              <ArrowRight size={13} className="text-indigo-300 flex-shrink-0" />
+              <span><strong className="text-indigo-300">Next:</strong> {next.text}</span>
+            </p>
+            {next.action && (
+              <button type="button" onClick={next.action.run} className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">
+                {next.action.label}
+              </button>
+            )}
+          </div>
+          <div role="tablist" aria-label="Job details" className="flex gap-1 overflow-x-auto">
+            {detailTabsFor().map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={detailTab === t.id}
+                onClick={() => setDetailTab(t.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
+                  detailTab === t.id ? 'bg-slate-800 text-slate-50 border border-slate-600' : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-4 sm:p-5 space-y-5 bg-slate-950/40">
+                    {detailTab === 'OVERVIEW' && (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 text-xs">
+                        <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
+                          <span className="text-slate-500 block text-[11px]">Client</span>
+                          <strong className="text-slate-100 block">{job.clientName}</strong>
+                          <span className="text-slate-400 block text-[11px] break-all">{job.clientEmail}</span>
+                        </div>
+                        <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
+                          <span className="text-slate-500 block text-[11px]">Appointment</span>
+                          <strong className="text-slate-100 block">
+                            {job.evaluation?.confirmedDate ? `${job.evaluation.confirmedDate} ${job.evaluation.confirmedTime || ''}` : 'Not set'}
+                          </strong>
+                          <span className="text-slate-400 block text-[11px]">{job.evaluation?.confirmedLocation || '—'}</span>
+                        </div>
+                        <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
+                          <span className="text-slate-500 block text-[11px]">Technician</span>
+                          <strong className="text-slate-100 block">{job.technicianAssigned || 'Unassigned'}</strong>
+                        </div>
+                        <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
+                          <span className="text-slate-500 block text-[11px]">Billing</span>
+                          <strong className="text-emerald-400 block">₱{total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                          <span className={`block text-[11px] ${total > 0 && paid < total ? 'text-amber-300' : 'text-slate-400'}`}>
+                            {total === 0 ? 'No invoice yet' : paid >= total ? 'Paid in full' : `Balance ₱${(total - paid).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                          </span>
+                        </div>
+                        <div className="col-span-2 md:col-span-4 p-3 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
+                          <span className="text-slate-500 block text-[11px]">Reported issue</span>
+                          <p className="text-slate-200 whitespace-pre-line">{job.reportedIssue}</p>
+                        </div>
+                      </div>
+                    )}
+                    {detailTab === 'DEVICE' && (<>
+                    {/* Customer Contact & Device Hardware Details */}
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                      {/* Customer Contact Card */}
+                      <div className="md:col-span-4 p-4 rounded-xl bg-slate-900/70 border border-slate-800 space-y-2 text-xs font-mono">
+                        <span className="text-[11px] uppercase text-slate-400 font-bold flex items-center gap-1.5 font-sans">
+                          <User size={13} className="text-indigo-400" />
+                          Customer & Submitter Information
+                        </span>
+                        <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 space-y-1.5">
+                          <div className="text-slate-200 font-sans font-bold text-sm">{job.clientName}</div>
+                          <div className="text-slate-400 flex items-center gap-1.5">
+                            <Mail size={12} className="text-slate-500" />
+                            {job.clientEmail}
+                          </div>
+                          {job.clientPhone && (
+                            <div className="text-slate-400 flex items-center gap-1.5">
+                              <Phone size={12} className="text-slate-500" />
+                              {job.clientPhone}
+                            </div>
+                          )}
+                          <div className="text-slate-400 flex items-center gap-1.5 font-sans">
+                            <Building size={12} className="text-slate-500" />
+                            {job.clientDepartment || 'Undergraduate Engineering'}
+                          </div>
+                          <div className="text-slate-400 flex items-center gap-1.5 pt-1 border-t border-slate-800">
+                            <Clock size={12} className="text-slate-500" />
+                            Assigned Tech: <strong className="text-slate-200">{job.technicianAssigned || 'Unassigned'}</strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Problem/Issue & Specifications */}
+                      <div className="md:col-span-8 p-4 rounded-xl bg-slate-900/70 border border-slate-800 space-y-2">
+                        <span className="text-[11px] font-mono uppercase text-slate-400 font-bold flex items-center gap-1.5">
+                          <AlertTriangle size={13} className="text-rose-400" />
+                          Problem / Reported Issue & Hardware Specs
+                        </span>
+                        <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 space-y-2 text-xs">
+                          <p className="text-rose-300 leading-relaxed font-medium whitespace-pre-line">
+                            {job.reportedIssue}
+                          </p>
+                          <div className="pt-2 border-t border-slate-800 text-slate-400 font-mono text-[11px] flex items-center gap-1.5">
+                            <Cpu size={12} className="text-indigo-400 flex-shrink-0" />
+                            <span>Specs: {job.osSpecs || 'Not specified by client'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Pre-Diagnostic Intake Inspection Checklist */}
+                    <div className="p-4 sm:p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-800/60">
+                        <span className="text-xs font-mono uppercase text-slate-300 font-bold flex items-center gap-1.5">
+                          <ShieldCheck size={14} className="text-amber-400" />
+                          Intake Physical Inspection Checklist
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 text-xs">
+                        <div
+                          className={`p-3 rounded-lg border flex items-center gap-2.5 ${
+                            job.inspectionNotes.scratchesDents
+                              ? 'bg-amber-950/30 border-amber-500/50 text-amber-200'
+                              : 'bg-slate-950/50 border-slate-800/80 text-slate-400'
+                          }`}
+                        >
+                          {job.inspectionNotes.scratchesDents ? (
+                            <CheckSquare size={16} className="text-amber-400 flex-shrink-0" />
+                          ) : (
+                            <Square size={16} className="text-slate-600 flex-shrink-0" />
+                          )}
+                          <span className="font-semibold">Scratches / Dents</span>
+                        </div>
+
+                        <div
+                          className={`p-3 rounded-lg border flex items-center gap-2.5 ${
+                            job.inspectionNotes.missingScrewsFeet
+                              ? 'bg-amber-950/30 border-amber-500/50 text-amber-200'
+                              : 'bg-slate-950/50 border-slate-800/80 text-slate-400'
+                          }`}
+                        >
+                          {job.inspectionNotes.missingScrewsFeet ? (
+                            <CheckSquare size={16} className="text-amber-400 flex-shrink-0" />
+                          ) : (
+                            <Square size={16} className="text-slate-600 flex-shrink-0" />
+                          )}
+                          <span className="font-semibold">Missing Screws / Feet</span>
+                        </div>
+
+                        <div
+                          className={`p-3 rounded-lg border flex items-center gap-2.5 ${
+                            job.inspectionNotes.screenDamageDeadPixels
+                              ? 'bg-amber-950/30 border-amber-500/50 text-amber-200'
+                              : 'bg-slate-950/50 border-slate-800/80 text-slate-400'
+                          }`}
+                        >
+                          {job.inspectionNotes.screenDamageDeadPixels ? (
+                            <CheckSquare size={16} className="text-amber-400 flex-shrink-0" />
+                          ) : (
+                            <Square size={16} className="text-slate-600 flex-shrink-0" />
+                          )}
+                          <span className="font-semibold">Screen Damage / Pixels</span>
+                        </div>
+
+                        <div
+                          className={`p-3 rounded-lg border flex items-center gap-2.5 ${
+                            job.inspectionNotes.liquidDamageIndicators
+                              ? 'bg-rose-950/30 border-rose-500/50 text-rose-200'
+                              : 'bg-slate-950/50 border-slate-800/80 text-slate-400'
+                          }`}
+                        >
+                          {job.inspectionNotes.liquidDamageIndicators ? (
+                            <CheckSquare size={16} className="text-rose-400 flex-shrink-0" />
+                          ) : (
+                            <Square size={16} className="text-slate-600 flex-shrink-0" />
+                          )}
+                          <span className="font-semibold">Liquid Damage (LCI)</span>
+                        </div>
+                      </div>
+
+                      {(() => {
+                        const cleanRemarks = (job.additionalInspectionNotes || '')
+                          .replace(/<!--LABASSIST_WORKFLOW:[\s\S]*?-->/g, '')
+                          .trim();
+                        if (!cleanRemarks) return null;
+                        return (
+                          <p className="text-xs text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/70 font-mono whitespace-pre-line">
+                            <span className="text-amber-300 font-bold mr-1">Remarks & Accessories:</span>
+                            {cleanRemarks}
+                          </p>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Photos the client attached at intake */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-900/60 border border-slate-800">
+                      <RepairPhotoGallery rma={job.id} kind="ISSUE" title="Photos of the problem" />
+                      <RepairPhotoGallery rma={job.id} kind="CONDITION" title="Photos of the device's condition" />
+                    </div>
+                    </>)}
+
+                    {/* ── WORKFLOW SECTION: EVALUATION STAGE (When in Evaluation Queue) ── */}
+                    {activeWorkflowTab === 'EVALUATION' && detailTab === 'EVALUATION' && (
+                      <div className="p-5 rounded-2xl bg-gradient-to-br from-purple-950/30 via-slate-900/90 to-indigo-950/30 border-2 border-purple-500/40 shadow-card space-y-5">
+                        <div className="flex items-center justify-between pb-3 border-b border-purple-500/30">
+                          <div className="flex items-center gap-2 text-purple-200 font-bold text-sm">
+                            <ClipboardCheck size={18} className="text-purple-400" />
+                            <span>Technician Evaluation & Service Feasibility Stage</span>
+                          </div>
+                          <span className="text-xs font-mono text-purple-300 bg-purple-500/20 px-2.5 py-0.5 rounded-full border border-purple-500/40">
+                            Received Intake
+                          </span>
+                        </div>
+
+                        {/* 2. Technician Evaluation / Assessment Notes */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-200 flex items-center justify-between">
+                            <span>Technician Diagnostic Evaluation & Assessment *</span>
+                            <span className="text-[11px] font-normal text-rose-400">Required before confirming</span>
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={formState.technicianEvaluation}
+                            onChange={(e) => handleFormChange(job.id, 'technicianEvaluation', e.target.value)}
+                            placeholder="Enter technician evaluation findings, initial multimeter/bench readings, root cause assessment..."
+                            className="w-full p-3 rounded-xl bg-slate-900 border border-purple-500/40 focus:border-purple-400 text-xs text-slate-100 placeholder-slate-500 outline-none resize-none font-mono"
+                          />
+                        </div>
+
+                        {/* 3. Feasibility & 4. Parts Availability */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {/* 3. Feasibility Assessment */}
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                              <Sparkles size={13} className="text-cyan-400" />
+                              Repair Feasibility Assessment
+                            </label>
+                            <select
+                              value={formState.repairFeasibility}
+                              onChange={(e) => handleFormChange(job.id, 'repairFeasibility', e.target.value)}
+                              className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold bg-slate-900 text-slate-100 border border-slate-700 focus:border-purple-400 outline-none cursor-pointer"
+                            >
+                              <option value="FEASIBLE">✅ Feasible for Bench Repair</option>
+                              <option value="NOT_FEASIBLE">❌ Not Feasible (Severe PCB Damage)</option>
+                              <option value="BER_BEYOND_ECONOMIC_REPAIR">⚠️ Beyond Economic Repair (BER)</option>
+                              <option value="PENDING">⏳ Pending Further Inspection</option>
+                            </select>
+                          </div>
+
+                          {/* 4. Parts Availability */}
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                              <Package size={13} className="text-amber-400" />
+                              Parts Availability
+                            </label>
+                            <select
+                              value={formState.partsAvailability}
+                              onChange={(e) => handleFormChange(job.id, 'partsAvailability', e.target.value)}
+                              className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold bg-slate-900 text-slate-100 border border-slate-700 focus:border-purple-400 outline-none cursor-pointer"
+                            >
+                              <option value="IN_STOCK">📦 In Lab Inventory (Ready)</option>
+                              <option value="TO_ORDER">🚚 Needs Sourcing / Order</option>
+                              <option value="CLIENT_PROVIDED">👤 Client Providing Part</option>
+                              <option value="NOT_AVAILABLE">🚫 Part Discontinued / Unavailable</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* 5. Confirmed Date, 6. Confirmed Time, 7. Confirmed Location */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          {/* 5. Confirmed Date */}
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                              <Calendar size={13} className="text-indigo-400" />
+                              Confirmed Date
+                            </label>
+                            <input
+                              type="date"
+                              min={localDateString()}
+                              value={formState.confirmedDate}
+                              onChange={(e) => handleFormChange(job.id, 'confirmedDate', e.target.value)}
+                              className="w-full px-3 py-2 rounded-xl text-xs font-mono bg-slate-900 text-slate-100 border border-slate-700 focus:border-purple-400 outline-none"
+                            />
+                          </div>
+
+                          {/* 6. Confirmed Time */}
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                              <Clock size={13} className="text-indigo-400" />
+                              Confirmed Time
+                            </label>
+                            <input
+                              type="time"
+                              min={formState.confirmedDate === localDateString() ? localTimeString() : undefined}
+                              value={formState.confirmedTime}
+                              onChange={(e) => handleFormChange(job.id, 'confirmedTime', e.target.value)}
+                              className="w-full px-3 py-2 rounded-xl text-xs font-mono bg-slate-900 text-slate-100 border border-slate-700 focus:border-purple-400 outline-none"
+                            />
+                          </div>
+
+                          {/* 7. Confirmed Repair Location / Room */}
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                              <MapPin size={13} className="text-emerald-400" />
+                              Confirmed Repair Room
+                            </label>
+                            <select
+                              value={formState.confirmedLocation}
+                              onChange={(e) => handleFormChange(job.id, 'confirmedLocation', e.target.value)}
+                              className="w-full px-3 py-2 rounded-xl text-xs font-semibold bg-slate-900 text-slate-100 border border-slate-700 focus:border-purple-400 outline-none cursor-pointer"
+                            >
+                              {LAB_ROOM_OPTIONS.map((room) => (
+                                <option key={room.code} value={room.code}>
+                                  {room.code} - {room.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Action Buttons: [Decline] and [Confirm Job Order] */}
+                        <div className="pt-4 border-t border-purple-500/30 flex flex-wrap items-center justify-between gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDeclineModal(job)}
+                            className="px-4 py-2.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-500/40 text-xs font-bold transition-all flex items-center gap-1.5"
+                          >
+                            <XCircle size={15} />
+                            <span>Decline Request</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={isConfirmingId === job.id}
+                            onClick={() => handleConfirmJobOrder(job)}
+                            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white text-xs font-bold transition-all flex items-center gap-2 shadow-glow-emerald disabled:opacity-50"
+                          >
+                            <CheckCircle2 size={16} />
+                            <span>{isConfirmingId === job.id ? 'Confirming...' : 'Confirm Job Order'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── WORKFLOW SECTION: CONFIRMED & COMPLETED JOB ORDERS (Diagnostic & Execution) ── */}
+                    {(activeWorkflowTab === 'CONFIRMED' || activeWorkflowTab === 'COMPLETED') && (
+                      <div className="space-y-5">
+                        {/* 1. Preserved Evaluation & Appointment Header Card */}
+                        {detailTab === 'EVALUATION' && (<div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-indigo-950/40 via-slate-900/90 to-purple-950/30 border border-indigo-500/30 space-y-3.5 text-xs">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-indigo-500/20">
+                            <div className="flex items-center gap-2 font-bold text-indigo-300">
+                              <ClipboardCheck size={16} className="text-indigo-400" />
+                              <span>Evaluation & Appointment Specifications</span>
+                            </div>
+                            <div className="flex items-center gap-2 font-mono text-[11px]">
+                              <span className="text-slate-400">Current Status:</span>
+                              {getStatusBadge(job.status)}
+                            </div>
+                          </div>
+
+                          {/* Grid with Appointment Date/Time, Location Room, Feasibility, Parts, and Assigned Tech */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 font-mono text-[11px]">
+                            {/* Appointment Date & Time */}
+                            <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
+                              <span className="text-slate-500 font-sans flex items-center gap-1 font-semibold">
+                                <Calendar size={12} className="text-indigo-400" />
+                                Appointment Schedule:
+                              </span>
+                              <span className="font-bold text-slate-100 block">
+                                {job.evaluation?.confirmedDate || '2026-09-28'} @ {job.evaluation?.confirmedTime || '10:00 AM'}
+                              </span>
+                            </div>
+
+                            {/* Repair Location / Room */}
+                            <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
+                              <span className="text-slate-500 font-sans flex items-center gap-1 font-semibold">
+                                <MapPin size={12} className="text-emerald-400" />
+                                Repair Location:
+                              </span>
+                              <span className="font-bold text-emerald-300 block">
+                                {job.evaluation?.confirmedLocation || 'LAB-101'}
+                              </span>
+                            </div>
+
+                            {/* Feasibility Assessment */}
+                            <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
+                              <span className="text-slate-500 font-sans flex items-center gap-1 font-semibold">
+                                <Sparkles size={12} className="text-cyan-400" />
+                                Feasibility:
+                              </span>
+                              <span className="font-bold text-cyan-300 block">
+                                {job.evaluation?.repairFeasibility === 'NOT_FEASIBLE'
+                                  ? '❌ Not Feasible'
+                                  : job.evaluation?.repairFeasibility === 'BER_BEYOND_ECONOMIC_REPAIR'
+                                  ? '⚠️ Beyond Econ. Repair'
+                                  : '✅ Feasible for Repair'}
+                              </span>
+                            </div>
+
+                            {/* Parts Availability */}
+                            <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
+                              <span className="text-slate-500 font-sans flex items-center gap-1 font-semibold">
+                                <Package size={12} className="text-amber-400" />
+                                Parts Availability:
+                              </span>
+                              <span className="font-bold text-amber-300 block">
+                                {job.evaluation?.partsAvailability === 'TO_ORDER'
+                                  ? '🚚 To Order'
+                                  : job.evaluation?.partsAvailability === 'CLIENT_PROVIDED'
+                                  ? '👤 Client Provided'
+                                  : job.evaluation?.partsAvailability === 'NOT_AVAILABLE'
+                                  ? '🚫 Unavailable'
+                                  : '📦 In Lab Stock'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Technician Diagnostic Evaluation Assessment Remarks */}
+                          <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1 text-xs font-mono">
+                            <span className="text-indigo-300 font-bold font-sans flex items-center gap-1.5">
+                              <FileText size={13} />
+                              Technician Diagnostic Assessment:
+                            </span>
+                            <p className="text-slate-200 leading-relaxed">
+                              {job.evaluation?.technicianEvaluation ||
+                                job.technicianNotes ||
+                                'Evaluation completed. Unit verified for servicing.'}
+                            </p>
+                          </div>
+                        </div>)}
+
+                        {/* 2. Active Diagnostics & Work Bench Logs */}
+                        <div className="space-y-4">
+                        {detailTab === 'WORK' && (
+                        <div className="p-4 sm:p-5 rounded-2xl bg-indigo-950/20 border border-indigo-500/30 space-y-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-indigo-500/20">
+                            <span className="text-xs font-mono uppercase text-indigo-300 font-bold flex items-center gap-1.5">
+                              <Wrench size={14} className="text-indigo-400" />
+                              Diagnostics, Inspection & Customer Communication Workbench
+                            </span>
+
+                            <span className="text-xs text-slate-400 font-mono">
+                              Assigned Tech: <strong className="text-slate-200">{job.technicianAssigned || 'Unassigned'}</strong>
+                            </span>
+                          </div>
+
+                          {/* Customer Communication & Actual Requirements Banner */}
+                          <div className="p-3.5 rounded-xl bg-slate-900/90 border border-indigo-500/20 space-y-2 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-indigo-300 flex items-center gap-1.5 font-sans">
+                                <Phone size={13} className="text-indigo-400" />
+                                Customer Communication & Actual Repair Scope
+                              </span>
+                              <span className="text-[11px] font-mono text-slate-400">
+                                Contact: <strong className="text-slate-200">{job.clientEmail}</strong>
+                              </span>
+                            </div>
+
+                            <p className="text-slate-300 text-[11px] leading-relaxed">
+                              Inspect the hardware on the bench, formulate the actual repair requirements and labor/parts estimate, then communicate with the customer for authorization.
+                            </p>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                            {/* Diagnostic Findings & Actions */}
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-400 font-semibold flex items-center gap-1">
+                                  <FileText size={12} className="text-indigo-400" />
+                                  Diagnostic Inspection Findings & Repair Requirements:
+                                </span>
+                                {editingNotesId !== job.id && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingNotesId(job.id);
+                                      setTechNoteDraft(job.technicianNotes || '');
+                                    }}
+                                    className="text-indigo-400 hover:text-indigo-300 text-[11px] font-semibold flex items-center gap-1"
+                                  >
+                                    <Edit3 size={11} /> Edit Note
+                                  </button>
+                                )}
+                              </div>
+
+                              {editingNotesId === job.id ? (
+                                <div className="space-y-2">
+                                  <textarea
+                                    rows={4}
+                                    value={techNoteDraft}
+                                    onChange={(e) => setTechNoteDraft(e.target.value)}
+                                    placeholder="Enter physical inspection findings, circuit board multimeter readings, required repair scope, and estimated cost communicated to customer..."
+                                    className="w-full p-2.5 rounded-lg bg-slate-900 border border-indigo-500 focus:outline-none text-xs text-slate-100 placeholder-slate-500 resize-none font-mono"
+                                  />
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveTechNote(job.id)}
+                                      className="py-1 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
+                                    >
+                                      Save Findings
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingNotesId(null)}
+                                      className="py-1 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-slate-200 bg-slate-900/80 p-3 rounded-lg border border-slate-800 leading-relaxed font-mono min-h-[80px]">
+                                  {job.technicianNotes || 'No diagnostic findings logged yet. Click Edit Note to record component inspection and customer communication.'}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Component Parts Replaced */}
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-400 font-semibold flex items-center gap-1">
+                                  <Package size={12} className="text-amber-400" />
+                                  Component Parts Sourced / Replaced:
+                                </span>
+                                {editingPartsId !== job.id && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingPartsId(job.id);
+                                      setPartsReplacedDraft(job.partsReplaced || '');
+                                    }}
+                                    className="text-amber-400 hover:text-amber-300 text-[11px] font-semibold flex items-center gap-1"
+                                  >
+                                    <Edit3 size={11} /> Edit Parts
+                                  </button>
+                                )}
+                              </div>
+
+                              {editingPartsId === job.id ? (
+                                <div className="space-y-2">
+                                  <textarea
+                                    rows={4}
+                                    value={partsReplacedDraft}
+                                    onChange={(e) => setPartsReplacedDraft(e.target.value)}
+                                    placeholder="Enter replacement part numbers, manufacturer details, and swapped components..."
+                                    className="w-full p-2.5 rounded-lg bg-slate-900 border border-amber-500 focus:outline-none text-xs text-slate-100 placeholder-slate-500 resize-none font-mono"
+                                  />
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSavePartsReplaced(job.id)}
+                                      className="py-1 px-3 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold"
+                                    >
+                                      Save Parts
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingPartsId(null)}
+                                      className="py-1 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-slate-200 bg-slate-900/80 p-3 rounded-lg border border-slate-800 leading-relaxed font-mono min-h-[80px]">
+                                  {job.partsReplaced || 'No replacement components logged yet for this Job Order.'}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                        </div>
+                        )}
+
+                          {/* 3. Dedicated Billing & Invoice Summary Section */}
+                          {detailTab === 'BILLING' && (<div className="p-4 rounded-xl bg-slate-900/90 border border-indigo-500/25 space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800">
+                              <div className="flex items-center gap-2 text-xs font-bold text-slate-200">
+                                <Receipt size={15} className="text-emerald-400" />
+                                <span>Billing & Invoice Specification</span>
+                              </div>
+
+                              <div className="flex items-center gap-2 font-mono text-[11px]">
+                                {job.billing?.paymentStatus === 'PAID' ? (
+                                  <span className="px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                                    <CheckCircle2 size={11} /> PAID
+                                  </span>
+                                ) : job.billing?.paymentStatus === 'PARTIALLY_PAID' ? (
+                                  <span className="px-2.5 py-0.5 rounded-full font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30 flex items-center gap-1">
+                                    <Clock size={11} /> PARTIALLY PAID
+                                  </span>
+                                ) : (
+                                  <span className="px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                                    <Clock size={11} /> UNPAID ({job.billing?.paymentTiming === 'PAY_NOW' ? 'Pay Now Pending' : 'Pay After Repair'})
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
+                              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 space-y-1">
+                                <span className="text-slate-500 font-sans block text-[11px]">Total Billed Amount:</span>
+                                <strong className="text-base font-bold text-emerald-400 block font-mono">
+                                  ₱{(job.billing?.totalAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                </strong>
+                              </div>
+
+                              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 space-y-1">
+                                <span className="text-slate-500 font-sans block text-[11px]">Payment Terms & Method:</span>
+                                <strong className="text-slate-200 block text-xs">
+                                  {job.billing?.paymentTiming === 'PAY_NOW' ? '⚡ Pay Now' : '🛠️ Pay After Repair'}
+                                  {job.billing?.paymentMethod ? ` · ${job.billing.paymentMethod}` : ''}
+                                </strong>
+                              </div>
+
+                              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 space-y-1">
+                                <span className="text-slate-500 font-sans block text-[11px]">Settlement / Reference:</span>
+                                <strong className="text-slate-300 block text-[11px] truncate">
+                                  {job.billing?.onlinePaymentReference
+                                    ? `Ref: ${job.billing.onlinePaymentReference}`
+                                    : job.billing?.paymentStatus === 'PAID'
+                                    ? 'Cash Settled'
+                                    : 'Awaiting Settlement'}
+                                </strong>
+                              </div>
+                            </div>
+
+                            {/* Amount Paid & Remaining Balance */}
+                            {(job.billing?.totalAmount || 0) > 0 && (
+                              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 space-y-1">
+                                  <span className="text-slate-500 font-sans block text-[11px]">Amount Paid:</span>
+                                  <strong className="text-sm font-bold text-cyan-300 block">
+                                    ₱{Number(job.billing?.amountPaid || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                  </strong>
+                                </div>
+                                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 space-y-1">
+                                  <span className="text-slate-500 font-sans block text-[11px]">Unpaid Balance:</span>
+                                  <strong className={`text-sm font-bold block ${Math.max(0, Number(job.billing?.totalAmount || 0) - Number(job.billing?.amountPaid || 0)) > 0 ? 'text-amber-300' : 'text-emerald-400'}`}>
+                                    ₱{Math.max(0, Number(job.billing?.totalAmount || 0) - Number(job.billing?.amountPaid || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                  </strong>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Materials, parts and labor billed (from the saved invoice) */}
+                            {(job.billing?.totalAmount || 0) > 0 || job.status === 'COMPLETED' ? (
+                              <JobMaterials jobOrderNumber={job.id} partsNote={job.partsReplaced} refreshKey={job.billing?.totalAmount} />
+                            ) : null}
+
+                            {/* Billing Actions */}
+                            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                              <span className="text-[11px] text-slate-400 font-sans">
+                                {job.billing?.totalAmount && job.billing.totalAmount > 0
+                                  ? 'Invoice linked to Job Order. Click View to inspect full invoice specification.'
+                                  : 'No invoice generated yet. Click Billing to set up scope, items, and cost.'}
+                              </span>
+
+                              <div className="flex items-center gap-2">
+                                {job.billing?.totalAmount && job.billing.totalAmount > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleViewInvoice(job)}
+                                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm"
+                                  >
+                                    <FileText size={13} className="text-cyan-400" />
+                                    <span>View Invoice</span>
+                                  </button>
+                                ) : null}
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenBillingModal(job)}
+                                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-glow-emerald"
+                                >
+                                  <CreditCard size={13} />
+                                  <span>{job.billing?.totalAmount && job.billing.totalAmount > 0 ? 'Edit Billing / Invoice' : 'Billing / Generate Invoice'}</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+)}
+
+                          {/* Ready for Pickup Information Banner */}
+                          {detailTab === 'OVERVIEW' && job.status === 'READY_FOR_PICKUP' && (
+                            <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/50 space-y-2.5 text-xs shadow-[0_0_15px_rgba(16,185,129,0.15)]">
+                              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-emerald-500/30">
+                                <div className="flex items-center gap-2 text-emerald-300 font-bold">
+                                  <CheckCircle2 size={16} className="text-emerald-400 animate-pulse" />
+                                  <span>Device Serviced & Ready for Customer Pickup</span>
+                                </div>
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                  Ready: {job.readyAt ? new Date(job.readyAt).toLocaleString() : 'Ready for Pickup'}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
+                                <div>
+                                  <span className="text-slate-400 block font-medium">Pickup Location:</span>
+                                  <strong className="text-slate-100 font-bold text-xs">
+                                    {job.pickupLocation || job.evaluation?.confirmedLocation || 'Electronics Diagnostics & Repair Desk - Room 402'}
+                                  </strong>
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 block font-medium">Customer Email Notification:</span>
+                                  <span className="text-cyan-300 font-mono flex items-center gap-1">
+                                    <Mail size={11} /> {job.clientEmail}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Completed & Released Handover Banner */}
+                          {detailTab === 'OVERVIEW' && job.status === 'COMPLETED' && (
+                            <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-950/60 via-slate-900 to-emerald-950/40 border border-emerald-500/60 shadow-[0_0_20px_rgba(16,185,129,0.15)] space-y-3 text-xs">
+                              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-emerald-500/30">
+                                <div className="flex items-center gap-2 text-emerald-300 font-bold text-sm">
+                                  <ShieldCheck size={18} className="text-emerald-400" />
+                                  <span>Job Order Completed &amp; Device Handover Concluded</span>
+                                </div>
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                                  <CheckCircle2 size={12} /> Status: COMPLETED
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px] font-mono">
+                                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 space-y-1">
+                                  <span className="text-slate-500 font-sans block text-[10px] uppercase font-bold">Device Claimed &amp; Released To:</span>
+                                  <strong className="text-emerald-300 block text-xs truncate">
+                                    {job.deviceReleasedTo || job.completion?.deviceReleasedTo || job.clientName}
+                                  </strong>
+                                </div>
+                                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 space-y-1">
+                                  <span className="text-slate-500 font-sans block text-[10px] uppercase font-bold">Completion Timestamp:</span>
+                                  <strong className="text-slate-200 block text-xs">
+                                    {(job.completedAt || job.completion?.completedAt)
+                                      ? new Date(job.completedAt || job.completion!.completedAt!).toLocaleString()
+                                      : new Date().toLocaleString()}
+                                  </strong>
+                                </div>
+                                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 space-y-1">
+                                  <span className="text-slate-500 font-sans block text-[10px] uppercase font-bold">Settlement Status:</span>
+                                  <strong className="text-emerald-400 block text-xs">
+                                    {job.billing?.settlementDate
+                                      ? `Settled (${new Date(job.billing.settlementDate).toLocaleDateString()})`
+                                      : 'Paid in Full'}
+                                  </strong>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-emerald-500/20">
+                                <div className="flex items-center gap-1.5 text-slate-400 text-[11px]">
+                                  <Lock size={12} className="text-emerald-400" />
+                                  <span>Official release recorded. Further repair-status changes are locked.</span>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenFinalReceipt(job)}
+                                    className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition-all shadow-glow-emerald flex items-center gap-1.5"
+                                  >
+                                    <Receipt size={14} />
+                                    <span>View Official Release Receipt</span>
+                                  </button>
+
+                                  {user?.role === 'ADMIN' && (
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        if (confirm(`Admin Override: Reopen Job Order ${job.id} back to In Diagnostics?`)) {
+                                          const ok = await updateRepair(job.id, { status: 'IN_DIAGNOSTICS', isAdmin: true });
+                                          if (ok) {
+                                            toast.info('Job Order Reopened', `Job order ${job.id} reopened by administrator.`);
+                                          }
+                                        }
+                                      }}
+                                      className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold transition-all flex items-center gap-1"
+                                    >
+                                      <span>Reopen (Admin)</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 4. Job Order Status Progression Controls (All 6 Required Statuses) */}
+                          {detailTab === 'WORK' && (<div className="p-4 rounded-2xl bg-indigo-950/20 border border-indigo-500/30 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-mono text-slate-400 uppercase font-bold flex items-center gap-1.5">
+                                <Layers size={13} className="text-indigo-400" />
+                                Update Repair Progress (Status Action Buttons):
+                              </span>
+                              <span className="text-[11px] font-mono text-slate-400">
+                                Current: <strong className="text-slate-200">{job.status.replace(/_/g, ' ')}</strong>
+                              </span>
+                            </div>
+
+                            {job.status === 'COMPLETED' ? (
+                              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-400 text-xs flex items-center justify-between">
+                                <div className="flex items-center gap-2 text-slate-300">
+                                  <Lock size={14} className="text-emerald-400" />
+                                  <span>Job Order is Completed and locked against further technician status modifications.</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenFinalReceipt(job)}
+                                  className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-semibold flex items-center gap-1"
+                                >
+                                  <Receipt size={12} className="text-emerald-400" />
+                                  <span>Receipt</span>
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap items-center gap-2 pt-1">
+                                {/* Billing Action Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenBillingModal(job)}
+                                  className="py-1.5 px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition-all flex items-center gap-1.5 mr-1"
+                                >
+                                  <CreditCard size={13} />
+                                  <span>Billing</span>
+                                </button>
+
+                                {/* 1. Diagnostics */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateStatus(job.id, 'IN_DIAGNOSTICS')}
+                                  className={`py-1.5 px-3 rounded-xl text-xs font-semibold transition-all border ${
+                                    job.status === 'IN_DIAGNOSTICS'
+                                      ? 'bg-cyan-600 text-white border-cyan-400 shadow-glow-cyan'
+                                      : 'bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border-cyan-500/40'
+                                  }`}
+                                >
+                                  1. Diagnostics
+                                </button>
+
+                                {/* 2. Awaiting Parts */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateStatus(job.id, 'AWAITING_PARTS')}
+                                  className={`py-1.5 px-3 rounded-xl text-xs font-semibold transition-all border ${
+                                    job.status === 'AWAITING_PARTS'
+                                      ? 'bg-amber-600 text-white border-amber-400 shadow-glow-amber'
+                                      : 'bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
+                                  }`}
+                                >
+                                  2. Awaiting Parts
+                                </button>
+
+                                {/* 3. Repair In Progress */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateStatus(job.id, 'REPAIR_IN_PROGRESS')}
+                                  className={`py-1.5 px-3 rounded-xl text-xs font-semibold transition-all border ${
+                                    job.status === 'REPAIR_IN_PROGRESS'
+                                      ? 'bg-indigo-600 text-white border-indigo-400 shadow-glow-indigo'
+                                      : 'bg-indigo-500/15 hover:bg-indigo-500/30 text-indigo-300 border-indigo-500/40'
+                                  }`}
+                                >
+                                  3. Repair In Progress
+                                </button>
+
+                                {/* 4. Ready for Pickup */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateStatus(job.id, 'READY_FOR_PICKUP')}
+                                  className={`py-1.5 px-3 rounded-xl text-xs font-semibold transition-all border ${
+                                    job.status === 'READY_FOR_PICKUP'
+                                      ? 'bg-emerald-600 text-white border-emerald-400 shadow-glow-emerald'
+                                      : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
+                                  }`}
+                                >
+                                  4. Ready for Pickup
+                                </button>
+
+                                {/* 5. Completed */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateStatus(job.id, 'COMPLETED')}
+                                  className="py-1.5 px-3 rounded-xl text-xs font-semibold transition-all border bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-600/40"
+                                >
+                                  5. Completed
+                                </button>
+
+                                {/* 6. Cancel Job */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenDeclineModal(job)}
+                                  className="py-1.5 px-3 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-500/40 text-xs font-semibold transition-all flex items-center gap-1 ml-auto"
+                                >
+                                  <XCircle size={13} />
+                                  <span>6. Cancel Job</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>)}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── WORKFLOW SECTION: CANCELLED REASON DISPLAY (LOCKED FROM REPAIR) ── */}
+                    {activeWorkflowTab === 'CANCELLED' && detailTab === 'OVERVIEW' && (
+                      <div className="p-5 rounded-2xl bg-rose-950/30 border-2 border-rose-500/40 space-y-4 text-xs shadow-card">
+                        <div className="flex items-center justify-between pb-3 border-b border-rose-500/30">
+                          <div className="flex items-center gap-2 text-rose-300 font-bold text-sm">
+                            <AlertCircle size={18} />
+                            <span>Cancellation Audit Record (Job Terminated)</span>
+                          </div>
+                          <span className="px-3 py-0.5 rounded-full text-[11px] font-mono font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                            Status: CANCELLED
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-[11px]">
+                          <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
+                            <span className="text-slate-500 block font-sans font-semibold">Cancellation Reason:</span>
+                            <strong className="text-rose-200 text-xs font-sans block">
+                              {job.cancellation?.reason || 'Repair Cancelled'}
+                            </strong>
+                          </div>
+
+                          <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
+                            <span className="text-slate-500 block font-sans font-semibold">Responsible Technician:</span>
+                            <strong className="text-slate-200 text-xs font-sans block">
+                              {job.technicianAssigned || user?.name || 'Assigned Technician'}
+                            </strong>
+                          </div>
+
+                          <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
+                            <span className="text-slate-500 block font-sans font-semibold">Cancellation Date & Time:</span>
+                            <strong className="text-slate-200 text-xs block">
+                              {job.cancellation?.cancelledAt
+                                ? new Date(job.cancellation.cancelledAt).toLocaleString()
+                                : new Date().toLocaleString()}
+                            </strong>
+                          </div>
+                        </div>
+
+                        <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1.5">
+                          <span className="text-slate-400 font-semibold font-sans block">
+                            Detailed Cancellation Description & Remarks:
+                          </span>
+                          <p className="text-slate-200 leading-relaxed font-mono text-xs">
+                            {job.cancellation?.description ||
+                              'This repair request was cancelled by the technician or client.'}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-rose-500/20 text-[11px] font-mono text-slate-400">
+                          <span className="flex items-center gap-1.5 text-emerald-400">
+                            <CheckCircle2 size={13} />
+                            Cancellation record saved to database & prepared for customer notification
+                          </span>
+                          <span className="text-rose-400 font-bold">
+                            🚫 Job Order Locked (Cannot continue into repair)
+                          </span>
+                        </div>
+                      </div>
+                    )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -1188,8 +2209,9 @@ export default function TechnicianRepairsWorkbench() {
         </div>
       </div>
 
-      {/* ── Active Repair Request Cards List ──────────────────────── */}
-      <div className="space-y-4">
+      {/* ── Job list (left) and the selected job's details (right, on wide screens) ── */}
+      <div className={isWideLayout && filteredJobs.length > 0 ? 'grid grid-cols-[minmax(0,330px)_minmax(0,1fr)] gap-4 items-start' : ''}>
+      <div className="space-y-2.5">
         {filteredJobs.length === 0 ? (
           <div className="glass rounded-2xl p-12 text-center border border-slate-800/80 space-y-3">
             <div className="w-12 h-12 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-center mx-auto text-slate-500">
@@ -1225,7 +2247,6 @@ export default function TechnicianRepairsWorkbench() {
         ) : (
           filteredJobs.map((job) => {
             const isExpanded = expandedJobId === job.id;
-            const formState = evaluationForms[job.id] || getOrInitEvaluationForm(job);
 
             return (
               <div
@@ -1238,12 +2259,12 @@ export default function TechnicianRepairsWorkbench() {
               >
                 {/* ── Header: Job/Request ID, Customer, Device, Serial, Date ── */}
                 <div
-                  onClick={() => setExpandedJobId(isExpanded ? null : job.id)}
-                  className="p-5 cursor-pointer hover:bg-slate-800/30 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/60 select-none"
+                  onClick={() => setExpandedJobId(isExpanded && !isWideLayout ? null : job.id)}
+                  className={`cursor-pointer hover:bg-slate-800/30 transition-colors flex justify-between gap-3 select-none ${isWideLayout ? 'p-3.5 items-center' : 'p-4 flex-col md:flex-row md:items-center'}`}
                 >
                   <div className="flex items-start sm:items-center gap-3.5 min-w-0">
                     <div
-                      className={`w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 ${
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
                         job.deviceType === 'Laptop'
                           ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
                           : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
@@ -1252,21 +2273,23 @@ export default function TechnicianRepairsWorkbench() {
                       {job.deviceType === 'Laptop' ? <Laptop size={20} /> : <Monitor size={20} />}
                     </div>
 
-                    <div>
+                    <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-extrabold text-slate-100 text-sm sm:text-base">
+                        <span className={`font-extrabold text-slate-100 ${isWideLayout ? 'text-sm' : 'text-sm sm:text-base'}`}>
                           {job.deviceModel}
                         </span>
                         <span className="font-mono text-xs font-bold text-indigo-300 bg-indigo-500/15 px-2.5 py-0.5 rounded-md border border-indigo-500/30">
                           {job.id}
                         </span>
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">
-                          {job.deviceType}
-                        </span>
+                        {!isWideLayout && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                            {job.deviceType}
+                          </span>
+                        )}
                       </div>
 
                       {/* Customer & Hardware Summary */}
-                      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 mt-1 font-mono">
+                      <div className={`flex flex-wrap items-center gap-3 text-xs text-slate-400 mt-1 font-mono ${isWideLayout ? '[&>*:not(:first-child)]:hidden' : ''}`}>
                         <span className="text-slate-300 flex items-center gap-1 font-sans font-medium">
                           <User size={12} className="text-slate-500" />
                           {job.clientName}
@@ -1282,922 +2305,37 @@ export default function TechnicianRepairsWorkbench() {
                           S/N: {job.serialNumber}
                         </span>
                       </div>
+                      {isWideLayout && <div className="mt-1.5 whitespace-nowrap">{getStatusBadge(job.status)}</div>}
                     </div>
                   </div>
 
                   {/* Right Header Badges */}
                   <div className="flex items-center gap-3 self-end md:self-center">
-                    <div className="text-right hidden sm:block">
+                    <div className={`text-right whitespace-nowrap ${isWideLayout ? 'hidden' : 'hidden sm:block'}`}>
                       <span className="text-[10px] text-slate-500 block font-mono">Request Date</span>
                       <span className="text-xs text-slate-300 font-medium">
                         {job.intakeDate ? new Date(job.intakeDate).toLocaleDateString() : 'Today'}
                       </span>
                     </div>
 
-                    <div>{getStatusBadge(job.status)}</div>
+                    {!isWideLayout && <div className="whitespace-nowrap">{getStatusBadge(job.status)}</div>}
 
-                    <div className="p-1 rounded-lg bg-slate-800 text-slate-400">
-                      {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                    </div>
+                    {!isWideLayout && (
+                      <div className="p-1 rounded-lg bg-slate-800 text-slate-400">
+                        {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      </div>
+                    )}
                   </div>
                 </div>
-
-                {/* ── Expanded Content ──────────────────────────────────── */}
-                {isExpanded && (
-                  <div className="p-5 sm:p-6 space-y-6 bg-slate-950/50 animate-fade-in">
-                    {/* Customer Contact & Device Hardware Details */}
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                      {/* Customer Contact Card */}
-                      <div className="md:col-span-4 p-4 rounded-xl bg-slate-900/70 border border-slate-800 space-y-2 text-xs font-mono">
-                        <span className="text-[11px] uppercase text-slate-400 font-bold flex items-center gap-1.5 font-sans">
-                          <User size={13} className="text-indigo-400" />
-                          Customer & Submitter Information
-                        </span>
-                        <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 space-y-1.5">
-                          <div className="text-slate-200 font-sans font-bold text-sm">{job.clientName}</div>
-                          <div className="text-slate-400 flex items-center gap-1.5">
-                            <Mail size={12} className="text-slate-500" />
-                            {job.clientEmail}
-                          </div>
-                          {job.clientPhone && (
-                            <div className="text-slate-400 flex items-center gap-1.5">
-                              <Phone size={12} className="text-slate-500" />
-                              {job.clientPhone}
-                            </div>
-                          )}
-                          <div className="text-slate-400 flex items-center gap-1.5 font-sans">
-                            <Building size={12} className="text-slate-500" />
-                            {job.clientDepartment || 'Undergraduate Engineering'}
-                          </div>
-                          <div className="text-slate-400 flex items-center gap-1.5 pt-1 border-t border-slate-800">
-                            <Clock size={12} className="text-slate-500" />
-                            Assigned Tech: <strong className="text-slate-200">{job.technicianAssigned || 'Unassigned'}</strong>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Problem/Issue & Specifications */}
-                      <div className="md:col-span-8 p-4 rounded-xl bg-slate-900/70 border border-slate-800 space-y-2">
-                        <span className="text-[11px] font-mono uppercase text-slate-400 font-bold flex items-center gap-1.5">
-                          <AlertTriangle size={13} className="text-rose-400" />
-                          Problem / Reported Issue & Hardware Specs
-                        </span>
-                        <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 space-y-2 text-xs">
-                          <p className="text-rose-300 leading-relaxed font-medium whitespace-pre-line">
-                            {job.reportedIssue}
-                          </p>
-                          <div className="pt-2 border-t border-slate-800 text-slate-400 font-mono text-[11px] flex items-center gap-1.5">
-                            <Cpu size={12} className="text-indigo-400 flex-shrink-0" />
-                            <span>Specs: {job.osSpecs || 'Not specified by client'}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Pre-Diagnostic Intake Inspection Checklist */}
-                    <div className="p-4 sm:p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
-                      <div className="flex items-center justify-between pb-2 border-b border-slate-800/60">
-                        <span className="text-xs font-mono uppercase text-slate-300 font-bold flex items-center gap-1.5">
-                          <ShieldCheck size={14} className="text-amber-400" />
-                          Intake Physical Inspection Checklist
-                        </span>
-                        <span className="text-[10px] font-mono text-slate-500 uppercase">Dispute Protection</span>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 text-xs">
-                        <div
-                          className={`p-3 rounded-lg border flex items-center gap-2.5 ${
-                            job.inspectionNotes.scratchesDents
-                              ? 'bg-amber-950/30 border-amber-500/50 text-amber-200'
-                              : 'bg-slate-950/50 border-slate-800/80 text-slate-400'
-                          }`}
-                        >
-                          {job.inspectionNotes.scratchesDents ? (
-                            <CheckSquare size={16} className="text-amber-400 flex-shrink-0" />
-                          ) : (
-                            <Square size={16} className="text-slate-600 flex-shrink-0" />
-                          )}
-                          <span className="font-semibold">Scratches / Dents</span>
-                        </div>
-
-                        <div
-                          className={`p-3 rounded-lg border flex items-center gap-2.5 ${
-                            job.inspectionNotes.missingScrewsFeet
-                              ? 'bg-amber-950/30 border-amber-500/50 text-amber-200'
-                              : 'bg-slate-950/50 border-slate-800/80 text-slate-400'
-                          }`}
-                        >
-                          {job.inspectionNotes.missingScrewsFeet ? (
-                            <CheckSquare size={16} className="text-amber-400 flex-shrink-0" />
-                          ) : (
-                            <Square size={16} className="text-slate-600 flex-shrink-0" />
-                          )}
-                          <span className="font-semibold">Missing Screws / Feet</span>
-                        </div>
-
-                        <div
-                          className={`p-3 rounded-lg border flex items-center gap-2.5 ${
-                            job.inspectionNotes.screenDamageDeadPixels
-                              ? 'bg-amber-950/30 border-amber-500/50 text-amber-200'
-                              : 'bg-slate-950/50 border-slate-800/80 text-slate-400'
-                          }`}
-                        >
-                          {job.inspectionNotes.screenDamageDeadPixels ? (
-                            <CheckSquare size={16} className="text-amber-400 flex-shrink-0" />
-                          ) : (
-                            <Square size={16} className="text-slate-600 flex-shrink-0" />
-                          )}
-                          <span className="font-semibold">Screen Damage / Pixels</span>
-                        </div>
-
-                        <div
-                          className={`p-3 rounded-lg border flex items-center gap-2.5 ${
-                            job.inspectionNotes.liquidDamageIndicators
-                              ? 'bg-rose-950/30 border-rose-500/50 text-rose-200'
-                              : 'bg-slate-950/50 border-slate-800/80 text-slate-400'
-                          }`}
-                        >
-                          {job.inspectionNotes.liquidDamageIndicators ? (
-                            <CheckSquare size={16} className="text-rose-400 flex-shrink-0" />
-                          ) : (
-                            <Square size={16} className="text-slate-600 flex-shrink-0" />
-                          )}
-                          <span className="font-semibold">Liquid Damage (LCI)</span>
-                        </div>
-                      </div>
-
-                      {(() => {
-                        const cleanRemarks = (job.additionalInspectionNotes || '')
-                          .replace(/<!--LABASSIST_WORKFLOW:[\s\S]*?-->/g, '')
-                          .trim();
-                        if (!cleanRemarks) return null;
-                        return (
-                          <p className="text-xs text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/70 font-mono whitespace-pre-line">
-                            <span className="text-amber-300 font-bold mr-1">Remarks & Accessories:</span>
-                            {cleanRemarks}
-                          </p>
-                        );
-                      })()}
-                    </div>
-
-                    {/* ── WORKFLOW SECTION: EVALUATION STAGE (When in Evaluation Queue) ── */}
-                    {activeWorkflowTab === 'EVALUATION' && (
-                      <div className="p-5 rounded-2xl bg-gradient-to-br from-purple-950/30 via-slate-900/90 to-indigo-950/30 border-2 border-purple-500/40 shadow-card space-y-5">
-                        <div className="flex items-center justify-between pb-3 border-b border-purple-500/30">
-                          <div className="flex items-center gap-2 text-purple-200 font-bold text-sm">
-                            <ClipboardCheck size={18} className="text-purple-400" />
-                            <span>Technician Evaluation & Service Feasibility Stage</span>
-                          </div>
-                          <span className="text-xs font-mono text-purple-300 bg-purple-500/20 px-2.5 py-0.5 rounded-full border border-purple-500/40">
-                            1. Received Intake
-                          </span>
-                        </div>
-
-                        {/* 2. Technician Evaluation / Assessment Notes */}
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-bold text-slate-200 flex items-center justify-between">
-                            <span>2. Technician Diagnostic Evaluation & Assessment *</span>
-                            <span className="text-[11px] font-normal text-rose-400">Required before confirming</span>
-                          </label>
-                          <textarea
-                            rows={3}
-                            value={formState.technicianEvaluation}
-                            onChange={(e) => handleFormChange(job.id, 'technicianEvaluation', e.target.value)}
-                            placeholder="Enter technician evaluation findings, initial multimeter/bench readings, root cause assessment..."
-                            className="w-full p-3 rounded-xl bg-slate-900 border border-purple-500/40 focus:border-purple-400 text-xs text-slate-100 placeholder-slate-500 outline-none resize-none font-mono"
-                          />
-                        </div>
-
-                        {/* 3. Feasibility & 4. Parts Availability */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {/* 3. Feasibility Assessment */}
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                              <Sparkles size={13} className="text-cyan-400" />
-                              3. Repair Feasibility Assessment
-                            </label>
-                            <select
-                              value={formState.repairFeasibility}
-                              onChange={(e) => handleFormChange(job.id, 'repairFeasibility', e.target.value)}
-                              className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold bg-slate-900 text-slate-100 border border-slate-700 focus:border-purple-400 outline-none cursor-pointer"
-                            >
-                              <option value="FEASIBLE">✅ Feasible for Bench Repair</option>
-                              <option value="NOT_FEASIBLE">❌ Not Feasible (Severe PCB Damage)</option>
-                              <option value="BER_BEYOND_ECONOMIC_REPAIR">⚠️ Beyond Economic Repair (BER)</option>
-                              <option value="PENDING">⏳ Pending Further Inspection</option>
-                            </select>
-                          </div>
-
-                          {/* 4. Parts Availability */}
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                              <Package size={13} className="text-amber-400" />
-                              4. Parts Availability
-                            </label>
-                            <select
-                              value={formState.partsAvailability}
-                              onChange={(e) => handleFormChange(job.id, 'partsAvailability', e.target.value)}
-                              className="w-full px-3 py-2.5 rounded-xl text-xs font-semibold bg-slate-900 text-slate-100 border border-slate-700 focus:border-purple-400 outline-none cursor-pointer"
-                            >
-                              <option value="IN_STOCK">📦 In Lab Inventory (Ready)</option>
-                              <option value="TO_ORDER">🚚 Needs Sourcing / Order</option>
-                              <option value="CLIENT_PROVIDED">👤 Client Providing Part</option>
-                              <option value="NOT_AVAILABLE">🚫 Part Discontinued / Unavailable</option>
-                            </select>
-                          </div>
-                        </div>
-
-                        {/* 5. Confirmed Date, 6. Confirmed Time, 7. Confirmed Location */}
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                          {/* 5. Confirmed Date */}
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                              <Calendar size={13} className="text-indigo-400" />
-                              5. Confirmed Date
-                            </label>
-                            <input
-                              type="date"
-                              min={localDateString()}
-                              value={formState.confirmedDate}
-                              onChange={(e) => handleFormChange(job.id, 'confirmedDate', e.target.value)}
-                              className="w-full px-3 py-2 rounded-xl text-xs font-mono bg-slate-900 text-slate-100 border border-slate-700 focus:border-purple-400 outline-none"
-                            />
-                          </div>
-
-                          {/* 6. Confirmed Time */}
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                              <Clock size={13} className="text-indigo-400" />
-                              6. Confirmed Time
-                            </label>
-                            <input
-                              type="time"
-                              min={formState.confirmedDate === localDateString() ? localTimeString() : undefined}
-                              value={formState.confirmedTime}
-                              onChange={(e) => handleFormChange(job.id, 'confirmedTime', e.target.value)}
-                              className="w-full px-3 py-2 rounded-xl text-xs font-mono bg-slate-900 text-slate-100 border border-slate-700 focus:border-purple-400 outline-none"
-                            />
-                          </div>
-
-                          {/* 7. Confirmed Repair Location / Room */}
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                              <MapPin size={13} className="text-emerald-400" />
-                              7. Confirmed Repair Room
-                            </label>
-                            <select
-                              value={formState.confirmedLocation}
-                              onChange={(e) => handleFormChange(job.id, 'confirmedLocation', e.target.value)}
-                              className="w-full px-3 py-2 rounded-xl text-xs font-semibold bg-slate-900 text-slate-100 border border-slate-700 focus:border-purple-400 outline-none cursor-pointer"
-                            >
-                              {LAB_ROOM_OPTIONS.map((room) => (
-                                <option key={room.code} value={room.code}>
-                                  {room.code} - {room.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-
-                        {/* Action Buttons: [Decline] and [Confirm Job Order] */}
-                        <div className="pt-4 border-t border-purple-500/30 flex flex-wrap items-center justify-between gap-3">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenDeclineModal(job)}
-                            className="px-4 py-2.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-500/40 text-xs font-bold transition-all flex items-center gap-1.5"
-                          >
-                            <XCircle size={15} />
-                            <span>Decline Request</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={isConfirmingId === job.id}
-                            onClick={() => handleConfirmJobOrder(job)}
-                            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white text-xs font-bold transition-all flex items-center gap-2 shadow-glow-emerald disabled:opacity-50"
-                          >
-                            <CheckCircle2 size={16} />
-                            <span>{isConfirmingId === job.id ? 'Confirming...' : 'Confirm Job Order'}</span>
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── WORKFLOW SECTION: CONFIRMED & COMPLETED JOB ORDERS (Diagnostic & Execution) ── */}
-                    {(activeWorkflowTab === 'CONFIRMED' || activeWorkflowTab === 'COMPLETED') && (
-                      <div className="space-y-5">
-                        {/* 1. Preserved Evaluation & Appointment Header Card */}
-                        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-indigo-950/40 via-slate-900/90 to-purple-950/30 border border-indigo-500/30 space-y-3.5 text-xs">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-indigo-500/20">
-                            <div className="flex items-center gap-2 font-bold text-indigo-300">
-                              <ClipboardCheck size={16} className="text-indigo-400" />
-                              <span>Evaluation & Appointment Specifications</span>
-                            </div>
-                            <div className="flex items-center gap-2 font-mono text-[11px]">
-                              <span className="text-slate-400">Current Status:</span>
-                              {getStatusBadge(job.status)}
-                            </div>
-                          </div>
-
-                          {/* Grid with Appointment Date/Time, Location Room, Feasibility, Parts, and Assigned Tech */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 font-mono text-[11px]">
-                            {/* Appointment Date & Time */}
-                            <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
-                              <span className="text-slate-500 font-sans flex items-center gap-1 font-semibold">
-                                <Calendar size={12} className="text-indigo-400" />
-                                Appointment Schedule:
-                              </span>
-                              <span className="font-bold text-slate-100 block">
-                                {job.evaluation?.confirmedDate || '2026-09-28'} @ {job.evaluation?.confirmedTime || '10:00 AM'}
-                              </span>
-                            </div>
-
-                            {/* Repair Location / Room */}
-                            <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
-                              <span className="text-slate-500 font-sans flex items-center gap-1 font-semibold">
-                                <MapPin size={12} className="text-emerald-400" />
-                                Repair Location:
-                              </span>
-                              <span className="font-bold text-emerald-300 block">
-                                {job.evaluation?.confirmedLocation || 'LAB-101'}
-                              </span>
-                            </div>
-
-                            {/* Feasibility Assessment */}
-                            <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
-                              <span className="text-slate-500 font-sans flex items-center gap-1 font-semibold">
-                                <Sparkles size={12} className="text-cyan-400" />
-                                Feasibility:
-                              </span>
-                              <span className="font-bold text-cyan-300 block">
-                                {job.evaluation?.repairFeasibility === 'NOT_FEASIBLE'
-                                  ? '❌ Not Feasible'
-                                  : job.evaluation?.repairFeasibility === 'BER_BEYOND_ECONOMIC_REPAIR'
-                                  ? '⚠️ Beyond Econ. Repair'
-                                  : '✅ Feasible for Repair'}
-                              </span>
-                            </div>
-
-                            {/* Parts Availability */}
-                            <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
-                              <span className="text-slate-500 font-sans flex items-center gap-1 font-semibold">
-                                <Package size={12} className="text-amber-400" />
-                                Parts Availability:
-                              </span>
-                              <span className="font-bold text-amber-300 block">
-                                {job.evaluation?.partsAvailability === 'TO_ORDER'
-                                  ? '🚚 To Order'
-                                  : job.evaluation?.partsAvailability === 'CLIENT_PROVIDED'
-                                  ? '👤 Client Provided'
-                                  : job.evaluation?.partsAvailability === 'NOT_AVAILABLE'
-                                  ? '🚫 Unavailable'
-                                  : '📦 In Lab Stock'}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Technician Diagnostic Evaluation Assessment Remarks */}
-                          <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1 text-xs font-mono">
-                            <span className="text-indigo-300 font-bold font-sans flex items-center gap-1.5">
-                              <FileText size={13} />
-                              Technician Diagnostic Assessment:
-                            </span>
-                            <p className="text-slate-200 leading-relaxed">
-                              {job.evaluation?.technicianEvaluation ||
-                                job.technicianNotes ||
-                                'Evaluation completed. Unit verified for servicing.'}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* 2. Active Diagnostics & Work Bench Logs */}
-                        <div className="p-4 sm:p-5 rounded-2xl bg-indigo-950/20 border border-indigo-500/30 space-y-4">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-indigo-500/20">
-                            <span className="text-xs font-mono uppercase text-indigo-300 font-bold flex items-center gap-1.5">
-                              <Wrench size={14} className="text-indigo-400" />
-                              Diagnostics, Inspection & Customer Communication Workbench
-                            </span>
-
-                            <span className="text-xs text-slate-400 font-mono">
-                              Assigned Tech: <strong className="text-slate-200">{job.technicianAssigned || 'Tech. Alex Torres'}</strong>
-                            </span>
-                          </div>
-
-                          {/* Customer Communication & Actual Requirements Banner */}
-                          <div className="p-3.5 rounded-xl bg-slate-900/90 border border-indigo-500/20 space-y-2 text-xs">
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold text-indigo-300 flex items-center gap-1.5 font-sans">
-                                <Phone size={13} className="text-indigo-400" />
-                                Customer Communication & Actual Repair Scope
-                              </span>
-                              <span className="text-[11px] font-mono text-slate-400">
-                                Contact: <strong className="text-slate-200">{job.clientEmail}</strong>
-                              </span>
-                            </div>
-
-                            <p className="text-slate-300 text-[11px] leading-relaxed">
-                              Inspect the hardware on the bench, formulate the actual repair requirements and labor/parts estimate, then communicate with the customer for authorization.
-                            </p>
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                            {/* Diagnostic Findings & Actions */}
-                            <div className="space-y-1.5">
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-400 font-semibold flex items-center gap-1">
-                                  <FileText size={12} className="text-indigo-400" />
-                                  Diagnostic Inspection Findings & Repair Requirements:
-                                </span>
-                                {editingNotesId !== job.id && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setEditingNotesId(job.id);
-                                      setTechNoteDraft(job.technicianNotes || '');
-                                    }}
-                                    className="text-indigo-400 hover:text-indigo-300 text-[11px] font-semibold flex items-center gap-1"
-                                  >
-                                    <Edit3 size={11} /> Edit Note
-                                  </button>
-                                )}
-                              </div>
-
-                              {editingNotesId === job.id ? (
-                                <div className="space-y-2">
-                                  <textarea
-                                    rows={4}
-                                    value={techNoteDraft}
-                                    onChange={(e) => setTechNoteDraft(e.target.value)}
-                                    placeholder="Enter physical inspection findings, circuit board multimeter readings, required repair scope, and estimated cost communicated to customer..."
-                                    className="w-full p-2.5 rounded-lg bg-slate-900 border border-indigo-500 focus:outline-none text-xs text-slate-100 placeholder-slate-500 resize-none font-mono"
-                                  />
-                                  <div className="flex gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSaveTechNote(job.id)}
-                                      className="py-1 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
-                                    >
-                                      Save Findings
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setEditingNotesId(null)}
-                                      className="py-1 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <p className="text-slate-200 bg-slate-900/80 p-3 rounded-lg border border-slate-800 leading-relaxed font-mono min-h-[80px]">
-                                  {job.technicianNotes || 'No diagnostic findings logged yet. Click Edit Note to record component inspection and customer communication.'}
-                                </p>
-                              )}
-                            </div>
-
-                            {/* Component Parts Replaced */}
-                            <div className="space-y-1.5">
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-400 font-semibold flex items-center gap-1">
-                                  <Package size={12} className="text-amber-400" />
-                                  Component Parts Sourced / Replaced:
-                                </span>
-                                {editingPartsId !== job.id && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setEditingPartsId(job.id);
-                                      setPartsReplacedDraft(job.partsReplaced || '');
-                                    }}
-                                    className="text-amber-400 hover:text-amber-300 text-[11px] font-semibold flex items-center gap-1"
-                                  >
-                                    <Edit3 size={11} /> Edit Parts
-                                  </button>
-                                )}
-                              </div>
-
-                              {editingPartsId === job.id ? (
-                                <div className="space-y-2">
-                                  <textarea
-                                    rows={4}
-                                    value={partsReplacedDraft}
-                                    onChange={(e) => setPartsReplacedDraft(e.target.value)}
-                                    placeholder="Enter replacement part numbers, manufacturer details, and swapped components..."
-                                    className="w-full p-2.5 rounded-lg bg-slate-900 border border-amber-500 focus:outline-none text-xs text-slate-100 placeholder-slate-500 resize-none font-mono"
-                                  />
-                                  <div className="flex gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSavePartsReplaced(job.id)}
-                                      className="py-1 px-3 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold"
-                                    >
-                                      Save Parts
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setEditingPartsId(null)}
-                                      className="py-1 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <p className="text-slate-200 bg-slate-900/80 p-3 rounded-lg border border-slate-800 leading-relaxed font-mono min-h-[80px]">
-                                  {job.partsReplaced || 'No replacement components logged yet for this Job Order.'}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* 3. Dedicated Billing & Invoice Summary Section */}
-                          <div className="p-4 rounded-xl bg-slate-900/90 border border-indigo-500/25 space-y-3">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800">
-                              <div className="flex items-center gap-2 text-xs font-bold text-slate-200">
-                                <Receipt size={15} className="text-emerald-400" />
-                                <span>Billing & Invoice Specification</span>
-                              </div>
-
-                              <div className="flex items-center gap-2 font-mono text-[11px]">
-                                {job.billing?.paymentStatus === 'PAID' ? (
-                                  <span className="px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                                    <CheckCircle2 size={11} /> PAID
-                                  </span>
-                                ) : job.billing?.paymentStatus === 'PARTIALLY_PAID' ? (
-                                  <span className="px-2.5 py-0.5 rounded-full font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30 flex items-center gap-1">
-                                    <Clock size={11} /> PARTIALLY PAID
-                                  </span>
-                                ) : (
-                                  <span className="px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                                    <Clock size={11} /> UNPAID ({job.billing?.paymentTiming === 'PAY_NOW' ? 'Pay Now Pending' : 'Pay After Repair'})
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
-                              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 space-y-1">
-                                <span className="text-slate-500 font-sans block text-[11px]">Total Billed Amount:</span>
-                                <strong className="text-base font-bold text-emerald-400 block font-mono">
-                                  ₱{(job.billing?.totalAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                </strong>
-                              </div>
-
-                              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 space-y-1">
-                                <span className="text-slate-500 font-sans block text-[11px]">Payment Terms & Method:</span>
-                                <strong className="text-slate-200 block text-xs">
-                                  {job.billing?.paymentTiming === 'PAY_NOW' ? '⚡ Pay Now' : '🛠️ Pay After Repair'}
-                                  {job.billing?.paymentMethod ? ` · ${job.billing.paymentMethod}` : ''}
-                                </strong>
-                              </div>
-
-                              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 space-y-1">
-                                <span className="text-slate-500 font-sans block text-[11px]">Settlement / Reference:</span>
-                                <strong className="text-slate-300 block text-[11px] truncate">
-                                  {job.billing?.onlinePaymentReference
-                                    ? `Ref: ${job.billing.onlinePaymentReference}`
-                                    : job.billing?.paymentStatus === 'PAID'
-                                    ? 'Cash Settled'
-                                    : 'Awaiting Settlement'}
-                                </strong>
-                              </div>
-                            </div>
-
-                            {/* Amount Paid & Remaining Balance */}
-                            {(job.billing?.totalAmount || 0) > 0 && (
-                              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-                                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 space-y-1">
-                                  <span className="text-slate-500 font-sans block text-[11px]">Amount Paid:</span>
-                                  <strong className="text-sm font-bold text-cyan-300 block">
-                                    ₱{Number(job.billing?.amountPaid || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                  </strong>
-                                </div>
-                                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 space-y-1">
-                                  <span className="text-slate-500 font-sans block text-[11px]">Unpaid Balance:</span>
-                                  <strong className={`text-sm font-bold block ${Math.max(0, Number(job.billing?.totalAmount || 0) - Number(job.billing?.amountPaid || 0)) > 0 ? 'text-amber-300' : 'text-emerald-400'}`}>
-                                    ₱{Math.max(0, Number(job.billing?.totalAmount || 0) - Number(job.billing?.amountPaid || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                  </strong>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Billing Actions */}
-                            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
-                              <span className="text-[11px] text-slate-400 font-sans">
-                                {job.billing?.totalAmount && job.billing.totalAmount > 0
-                                  ? 'Invoice linked to Job Order. Click View to inspect full invoice specification.'
-                                  : 'No invoice generated yet. Click Billing to set up scope, items, and cost.'}
-                              </span>
-
-                              <div className="flex items-center gap-2">
-                                {job.billing?.totalAmount && job.billing.totalAmount > 0 ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleViewInvoice(job)}
-                                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm"
-                                  >
-                                    <FileText size={13} className="text-cyan-400" />
-                                    <span>View Invoice</span>
-                                  </button>
-                                ) : null}
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenBillingModal(job)}
-                                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-glow-emerald"
-                                >
-                                  <CreditCard size={13} />
-                                  <span>{job.billing?.totalAmount && job.billing.totalAmount > 0 ? 'Edit Billing / Invoice' : 'Billing / Generate Invoice'}</span>
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Ready for Pickup Information Banner */}
-                          {job.status === 'READY_FOR_PICKUP' && (
-                            <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/50 space-y-2.5 text-xs shadow-[0_0_15px_rgba(16,185,129,0.15)]">
-                              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-emerald-500/30">
-                                <div className="flex items-center gap-2 text-emerald-300 font-bold">
-                                  <CheckCircle2 size={16} className="text-emerald-400 animate-pulse" />
-                                  <span>Device Serviced & Ready for Customer Pickup</span>
-                                </div>
-                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                                  Ready: {job.readyAt ? new Date(job.readyAt).toLocaleString() : 'Ready for Pickup'}
-                                </span>
-                              </div>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
-                                <div>
-                                  <span className="text-slate-400 block font-medium">Pickup Location:</span>
-                                  <strong className="text-slate-100 font-bold text-xs">
-                                    {job.pickupLocation || job.evaluation?.confirmedLocation || 'Electronics Diagnostics & Repair Desk - Room 402'}
-                                  </strong>
-                                </div>
-                                <div>
-                                  <span className="text-slate-400 block font-medium">Customer Email Notification:</span>
-                                  <span className="text-cyan-300 font-mono flex items-center gap-1">
-                                    <Mail size={11} /> {job.clientEmail}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Completed & Released Handover Banner */}
-                          {job.status === 'COMPLETED' && (
-                            <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-950/60 via-slate-900 to-emerald-950/40 border border-emerald-500/60 shadow-[0_0_20px_rgba(16,185,129,0.15)] space-y-3 text-xs">
-                              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-emerald-500/30">
-                                <div className="flex items-center gap-2 text-emerald-300 font-bold text-sm">
-                                  <ShieldCheck size={18} className="text-emerald-400" />
-                                  <span>Job Order Completed &amp; Device Handover Concluded</span>
-                                </div>
-                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-                                  <CheckCircle2 size={12} /> Status: COMPLETED
-                                </span>
-                              </div>
-
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px] font-mono">
-                                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 space-y-1">
-                                  <span className="text-slate-500 font-sans block text-[10px] uppercase font-bold">Device Claimed &amp; Released To:</span>
-                                  <strong className="text-emerald-300 block text-xs truncate">
-                                    {job.deviceReleasedTo || job.completion?.deviceReleasedTo || job.clientName}
-                                  </strong>
-                                </div>
-                                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 space-y-1">
-                                  <span className="text-slate-500 font-sans block text-[10px] uppercase font-bold">Completion Timestamp:</span>
-                                  <strong className="text-slate-200 block text-xs">
-                                    {(job.completedAt || job.completion?.completedAt)
-                                      ? new Date(job.completedAt || job.completion!.completedAt!).toLocaleString()
-                                      : new Date().toLocaleString()}
-                                  </strong>
-                                </div>
-                                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 space-y-1">
-                                  <span className="text-slate-500 font-sans block text-[10px] uppercase font-bold">Settlement Status:</span>
-                                  <strong className="text-emerald-400 block text-xs">
-                                    {job.billing?.settlementDate
-                                      ? `Settled (${new Date(job.billing.settlementDate).toLocaleDateString()})`
-                                      : 'Paid in Full'}
-                                  </strong>
-                                </div>
-                              </div>
-
-                              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-emerald-500/20">
-                                <div className="flex items-center gap-1.5 text-slate-400 text-[11px]">
-                                  <Lock size={12} className="text-emerald-400" />
-                                  <span>Official release recorded. Further repair-status changes are locked.</span>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenFinalReceipt(job)}
-                                    className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition-all shadow-glow-emerald flex items-center gap-1.5"
-                                  >
-                                    <Receipt size={14} />
-                                    <span>View Official Release Receipt</span>
-                                  </button>
-
-                                  {user?.role === 'ADMIN' && (
-                                    <button
-                                      type="button"
-                                      onClick={async () => {
-                                        if (confirm(`Admin Override: Reopen Job Order ${job.id} back to In Diagnostics?`)) {
-                                          const ok = await updateRepair(job.id, { status: 'IN_DIAGNOSTICS', isAdmin: true });
-                                          if (ok) {
-                                            toast.info('Job Order Reopened', `Job order ${job.id} reopened by administrator.`);
-                                          }
-                                        }
-                                      }}
-                                      className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold transition-all flex items-center gap-1"
-                                    >
-                                      <span>Reopen (Admin)</span>
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 4. Job Order Status Progression Controls (All 6 Required Statuses) */}
-                          <div className="pt-3 border-t border-indigo-500/20 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[11px] font-mono text-slate-400 uppercase font-bold flex items-center gap-1.5">
-                                <Layers size={13} className="text-indigo-400" />
-                                Update Repair Progress (Status Action Buttons):
-                              </span>
-                              <span className="text-[11px] font-mono text-slate-400">
-                                Current: <strong className="text-slate-200">{job.status.replace(/_/g, ' ')}</strong>
-                              </span>
-                            </div>
-
-                            {job.status === 'COMPLETED' ? (
-                              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-400 text-xs flex items-center justify-between">
-                                <div className="flex items-center gap-2 text-slate-300">
-                                  <Lock size={14} className="text-emerald-400" />
-                                  <span>Job Order is Completed and locked against further technician status modifications.</span>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenFinalReceipt(job)}
-                                  className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-semibold flex items-center gap-1"
-                                >
-                                  <Receipt size={12} className="text-emerald-400" />
-                                  <span>Receipt</span>
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex flex-wrap items-center gap-2 pt-1">
-                                {/* Billing Action Button */}
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenBillingModal(job)}
-                                  className="py-1.5 px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition-all flex items-center gap-1.5 mr-1"
-                                >
-                                  <CreditCard size={13} />
-                                  <span>Billing</span>
-                                </button>
-
-                                {/* 1. Diagnostics */}
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateStatus(job.id, 'IN_DIAGNOSTICS')}
-                                  className={`py-1.5 px-3 rounded-xl text-xs font-semibold transition-all border ${
-                                    job.status === 'IN_DIAGNOSTICS'
-                                      ? 'bg-cyan-600 text-white border-cyan-400 shadow-glow-cyan'
-                                      : 'bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border-cyan-500/40'
-                                  }`}
-                                >
-                                  1. Diagnostics
-                                </button>
-
-                                {/* 2. Awaiting Parts */}
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateStatus(job.id, 'AWAITING_PARTS')}
-                                  className={`py-1.5 px-3 rounded-xl text-xs font-semibold transition-all border ${
-                                    job.status === 'AWAITING_PARTS'
-                                      ? 'bg-amber-600 text-white border-amber-400 shadow-glow-amber'
-                                      : 'bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
-                                  }`}
-                                >
-                                  2. Awaiting Parts
-                                </button>
-
-                                {/* 3. Repair In Progress */}
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateStatus(job.id, 'REPAIR_IN_PROGRESS')}
-                                  className={`py-1.5 px-3 rounded-xl text-xs font-semibold transition-all border ${
-                                    job.status === 'REPAIR_IN_PROGRESS'
-                                      ? 'bg-indigo-600 text-white border-indigo-400 shadow-glow-indigo'
-                                      : 'bg-indigo-500/15 hover:bg-indigo-500/30 text-indigo-300 border-indigo-500/40'
-                                  }`}
-                                >
-                                  3. Repair In Progress
-                                </button>
-
-                                {/* 4. Ready for Pickup */}
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateStatus(job.id, 'READY_FOR_PICKUP')}
-                                  className={`py-1.5 px-3 rounded-xl text-xs font-semibold transition-all border ${
-                                    job.status === 'READY_FOR_PICKUP'
-                                      ? 'bg-emerald-600 text-white border-emerald-400 shadow-glow-emerald'
-                                      : 'bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
-                                  }`}
-                                >
-                                  4. Ready for Pickup
-                                </button>
-
-                                {/* 5. Completed */}
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateStatus(job.id, 'COMPLETED')}
-                                  className="py-1.5 px-3 rounded-xl text-xs font-semibold transition-all border bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-600/40"
-                                >
-                                  5. Completed
-                                </button>
-
-                                {/* 6. Cancel Job */}
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenDeclineModal(job)}
-                                  className="py-1.5 px-3 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-500/40 text-xs font-semibold transition-all flex items-center gap-1 ml-auto"
-                                >
-                                  <XCircle size={13} />
-                                  <span>6. Cancel Job</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── WORKFLOW SECTION: CANCELLED REASON DISPLAY (LOCKED FROM REPAIR) ── */}
-                    {activeWorkflowTab === 'CANCELLED' && (
-                      <div className="p-5 rounded-2xl bg-rose-950/30 border-2 border-rose-500/40 space-y-4 text-xs shadow-card">
-                        <div className="flex items-center justify-between pb-3 border-b border-rose-500/30">
-                          <div className="flex items-center gap-2 text-rose-300 font-bold text-sm">
-                            <AlertCircle size={18} />
-                            <span>Cancellation Audit Record (Job Terminated)</span>
-                          </div>
-                          <span className="px-3 py-0.5 rounded-full text-[11px] font-mono font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                            Status: CANCELLED
-                          </span>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-[11px]">
-                          <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
-                            <span className="text-slate-500 block font-sans font-semibold">Cancellation Reason:</span>
-                            <strong className="text-rose-200 text-xs font-sans block">
-                              {job.cancellation?.reason || 'Repair Cancelled'}
-                            </strong>
-                          </div>
-
-                          <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
-                            <span className="text-slate-500 block font-sans font-semibold">Responsible Technician:</span>
-                            <strong className="text-slate-200 text-xs font-sans block">
-                              {job.technicianAssigned || user?.name || 'Assigned Technician'}
-                            </strong>
-                          </div>
-
-                          <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
-                            <span className="text-slate-500 block font-sans font-semibold">Cancellation Date & Time:</span>
-                            <strong className="text-slate-200 text-xs block">
-                              {job.cancellation?.cancelledAt
-                                ? new Date(job.cancellation.cancelledAt).toLocaleString()
-                                : new Date().toLocaleString()}
-                            </strong>
-                          </div>
-                        </div>
-
-                        <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1.5">
-                          <span className="text-slate-400 font-semibold font-sans block">
-                            Detailed Cancellation Description & Remarks:
-                          </span>
-                          <p className="text-slate-200 leading-relaxed font-mono text-xs">
-                            {job.cancellation?.description ||
-                              'This repair request was cancelled by the technician or client.'}
-                          </p>
-                        </div>
-
-                        <div className="flex items-center justify-between pt-2 border-t border-rose-500/20 text-[11px] font-mono text-slate-400">
-                          <span className="flex items-center gap-1.5 text-emerald-400">
-                            <CheckCircle2 size={13} />
-                            Cancellation record saved to database & prepared for customer notification
-                          </span>
-                          <span className="text-rose-400 font-bold">
-                            🚫 Job Order Locked (Cannot continue into repair)
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                {!isWideLayout && isExpanded && <div className="border-t border-slate-800/60">{renderJobDetail(job)}</div>}
               </div>
             );
           })
         )}
+      </div>
+      {isWideLayout && selectedJob && (
+        <div className="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-2xl">{renderJobDetail(selectedJob)}</div>
+      )}
       </div>
 
       {/* ── DECLINE / CANCELLATION MODAL ─────────────────────────── */}
@@ -2370,11 +2508,16 @@ export default function TechnicianRepairsWorkbench() {
                         <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
                           {/* Work Scope */}
                           <div className="sm:col-span-5 space-y-1">
-                            <label className="text-[11px] font-semibold text-slate-300 block">
-                              Work Scope Description *
+                            <label className="text-[11px] font-semibold text-slate-300 flex justify-between gap-2">
+                              <span>Work Scope Description *</span>
+                              <span className={`font-mono font-normal ${item.workScope.length >= WORK_SCOPE_MAX ? 'text-amber-400' : 'text-slate-500'}`}>
+                                {item.workScope.length}/{WORK_SCOPE_MAX}
+                              </span>
                             </label>
                             <input
                               type="text"
+                              maxLength={WORK_SCOPE_MAX}
+                              title={item.workScope}
                               value={item.workScope}
                               onChange={(e) => handleUpdateBillingItem(item.id, 'workScope', e.target.value)}
                               placeholder="e.g. Motherboard Micro-soldering / Labor"
@@ -2698,7 +2841,7 @@ export default function TechnicianRepairsWorkbench() {
                 <span className="text-slate-500 font-sans uppercase text-[11px] font-bold block">Customer Details:</span>
                 <div><span className="text-slate-400">Client Name: </span><strong className="text-slate-100">{invoiceViewData.clientName}</strong></div>
                 {invoiceViewData.clientEmail && <div><span className="text-slate-400">Email: </span><span className="text-slate-300">{invoiceViewData.clientEmail}</span></div>}
-                <div><span className="text-slate-400">Assigned Tech: </span><strong className="text-slate-200">{invoiceViewData.assignedTechnician || 'Tech. Alex Torres'}</strong></div>
+                <div><span className="text-slate-400">Assigned Tech: </span><strong className="text-slate-200">{invoiceViewData.assignedTechnician && invoiceViewData.assignedTechnician !== 'Tech. Alex Torres' ? invoiceViewData.assignedTechnician : 'Unassigned'}</strong></div>
               </div>
 
               <div className="space-y-1.5">
@@ -3182,198 +3325,8 @@ export default function TechnicianRepairsWorkbench() {
         </ModalPortal>
       )}
 
-      {/* ── FINAL RELEASE & JOB ORDER COMPLETION RECEIPT MODAL ── */}
-      {finalReceiptData && (
-        <ModalPortal>
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
-          <div data-print-root className="w-full max-w-3xl my-8 rounded-2xl bg-slate-900 border border-emerald-500/50 shadow-2xl p-6 sm:p-8 space-y-6">
-            {/* Header / Brand */}
-            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-5 border-b border-slate-800">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
-                    <Receipt size={20} />
-                  </div>
-                  <div>
-                    <span className="text-[11px] font-mono uppercase font-bold text-emerald-400 tracking-wider">
-                      University of Makati · CCIS Lab Services
-                    </span>
-                    <h2 className="text-lg font-black text-slate-100">
-                      Official Device Release &amp; Completion Receipt
-                    </h2>
-                  </div>
-                </div>
-                <p className="text-xs text-slate-400 font-sans">
-                  Electronics Diagnostics &amp; IT Hardware Servicing Desk · Handover Verification
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 self-end sm:self-start">
-                <button
-                  type="button"
-                  onClick={(e) => printReceipt(e.currentTarget, "Release Receipt")}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm"
-                >
-                  <Printer size={13} className="text-emerald-400" />
-                  <span>Print / Save PDF</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFinalReceiptData(null)}
-                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-
-            {/* Top Status & Reference Banner */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                <span className="text-[10px] uppercase font-bold text-slate-500 font-mono block">Job Order Number</span>
-                <span className="text-sm font-extrabold font-mono text-cyan-400 block">{finalReceiptData.jobOrderId}</span>
-              </div>
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                <span className="text-[10px] uppercase font-bold text-slate-500 font-mono block">Invoice Reference</span>
-                <span className="text-sm font-bold font-mono text-emerald-400 block">{finalReceiptData.invoiceId}</span>
-              </div>
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                <span className="text-[10px] uppercase font-bold text-slate-500 font-mono block">Release Date &amp; Time</span>
-                <span className="text-xs font-semibold text-slate-200 block">
-                  {new Date(finalReceiptData.completedAt).toLocaleString()}
-                </span>
-              </div>
-            </div>
-
-            {/* Client & Device Details */}
-            <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800/90 space-y-3 text-xs">
-              <span className="text-[11px] font-bold text-slate-400 font-mono uppercase tracking-wider block">
-                Equipment &amp; Custody Information
-              </span>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Registered Owner:</span>
-                    <strong className="text-slate-200">{finalReceiptData.clientName}</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">University Email:</span>
-                    <span className="font-mono text-cyan-300">{finalReceiptData.clientEmail}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Department / College:</span>
-                    <span className="text-slate-300">{finalReceiptData.clientDepartment || 'UMak CCIS'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Device Released To:</span>
-                    <strong className="text-emerald-300 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                      {finalReceiptData.deviceReleasedTo}
-                    </strong>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Device Model:</span>
-                    <strong className="text-slate-200">{finalReceiptData.deviceModel}</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Device Type:</span>
-                    <span className="text-slate-300">{finalReceiptData.deviceType}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Serial Number:</span>
-                    <span className="font-mono text-cyan-300">{finalReceiptData.serialNumber}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Authorized Technician:</span>
-                    <strong className="text-slate-200">{finalReceiptData.technicianName}</strong>
-                  </div>
-                </div>
-              </div>
-
-              {/* Service & Scope Description */}
-              <div className="pt-2 border-t border-slate-800 space-y-1">
-                <span className="text-slate-400 font-semibold block">Work Scope &amp; Replacement Components:</span>
-                <p className="text-slate-300 font-mono text-[11px] leading-relaxed bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
-                  {finalReceiptData.partsReplaced && finalReceiptData.partsReplaced !== 'N/A'
-                    ? `Parts Replaced: ${finalReceiptData.partsReplaced} · Issue Addressed: ${finalReceiptData.reportedIssue}`
-                    : `Service Completed: Diagnostics, board verification, and servicing for ${finalReceiptData.reportedIssue}`}
-                </p>
-              </div>
-            </div>
-
-            {/* Payment & Settlement Specification */}
-            <div className="p-4 rounded-xl bg-slate-950/80 border border-emerald-500/30 space-y-3 text-xs">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                <span className="text-[11px] font-bold text-slate-400 font-mono uppercase tracking-wider block">
-                  Payment Settlement Summary
-                </span>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-                  <CheckCircle2 size={11} /> PAID IN FULL
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-[11px]">
-                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
-                  <span className="text-slate-500 block font-sans text-[10px]">Payment Method:</span>
-                  <strong className="text-slate-200 block text-xs">{finalReceiptData.paymentMethod}</strong>
-                </div>
-                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
-                  <span className="text-slate-500 block font-sans text-[10px]">Reference / Trace:</span>
-                  <strong className="text-slate-300 block text-xs truncate">
-                    {finalReceiptData.onlinePaymentReference || 'Cash Settlement'}
-                  </strong>
-                </div>
-                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
-                  <span className="text-slate-500 block font-sans text-[10px]">Settlement Date:</span>
-                  <strong className="text-slate-200 block text-xs">
-                    {new Date(finalReceiptData.settlementDate).toLocaleDateString()}
-                  </strong>
-                </div>
-                <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-500/40 space-y-1">
-                  <span className="text-emerald-400 block font-sans text-[10px] font-bold">Total Amount Paid:</span>
-                  <strong className="text-emerald-300 block text-sm font-black">
-                    ₱{Number(finalReceiptData.totalAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </strong>
-                </div>
-              </div>
-            </div>
-
-            {/* Handover Sign-off & Audit Notice */}
-            <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <CheckSquare size={15} className="text-emerald-400" />
-                <span>Device handover verified and logged in University of Makati IT Laboratory Repair Registry.</span>
-              </div>
-              <span className="font-mono text-emerald-400 font-bold uppercase text-[10px]">
-                OFFICIALLY COMPLETED
-              </span>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={(e) => printReceipt(e.currentTarget, "Release Receipt")}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5"
-              >
-                <Printer size={13} className="text-emerald-400" />
-                <span>Print / Save PDF</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setFinalReceiptData(null)}
-                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 shadow-glow-emerald flex items-center gap-1.5"
-              >
-                <Check size={14} />
-                <span>Done / Dismiss Receipt</span>
-              </button>
-            </div>
-          </div>
-        </div>
-        </ModalPortal>
-      )}
+      {/* ── FINAL RELEASE & JOB ORDER COMPLETION RECEIPT (shared with the student view) ── */}
+      {finalReceiptData && <ReleaseReceiptModal receipt={finalReceiptData} onClose={() => setFinalReceiptData(null)} />}
     </div>
   );
 }

@@ -34,3 +34,14 @@ export function findOverLimitField(values: Partial<Record<keyof typeof REPAIR_FI
   }
   return null;
 }
+
+/** Invoice line "Work Scope Description": server limit and the input's maxLength */
+export const WORK_SCOPE_MAX = 150;
+
+/** Pre-filled scope for a job's first invoice line, cut to fit the limit. */
+export function defaultWorkScope(reportedIssue?: string | null, fallback = 'Diagnostics & Repair'): string {
+  const issue = String(reportedIssue || '').replace(/\s+/g, ' ').trim();
+  if (!issue) return fallback;
+  const full = `Diagnostics & Repair: ${issue}`;
+  return full.length <= WORK_SCOPE_MAX ? full : full.slice(0, WORK_SCOPE_MAX - 1).trimEnd() + '…';
+}

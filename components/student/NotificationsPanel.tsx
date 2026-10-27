@@ -5,8 +5,10 @@ import { useNotifications, timeAgo } from '@/context/NotificationContext';
 import type { AppNotification } from '@/app/api/notifications/route';
 
 interface NotificationsPanelProps {
-  /** Switch the student portal to the tab a notification links to */
-  onOpenTab: (tab: string) => void;
+  /** Switch the student portal to the tab a notification links to (students only) */
+  onOpenTab?: (tab: string) => void;
+  /** Staff (technicians/admins) get wording about lab activity instead of "your reports" */
+  audience?: 'student' | 'staff';
 }
 
 const CATEGORY_STYLE: Record<AppNotification['category'], { label: string; icon: React.ReactNode; chip: string }> = {
@@ -32,7 +34,8 @@ const CATEGORY_STYLE: Record<AppNotification['category'], { label: string; icon:
   },
 };
 
-export default function NotificationsPanel({ onOpenTab }: NotificationsPanelProps) {
+export default function NotificationsPanel({ onOpenTab, audience = 'student' }: NotificationsPanelProps) {
+  const isStaff = audience === 'staff';
   const { notifications, unreadCount, isLoading, refreshNotifications, markRead, markAllRead } = useNotifications();
   const [filter, setFilter] = useState<'ALL' | 'UNREAD'>('ALL');
 
@@ -48,7 +51,7 @@ export default function NotificationsPanel({ onOpenTab }: NotificationsPanelProp
           </div>
           <div>
             <h2 className="text-base font-bold text-slate-100">Notifications</h2>
-            <p className="text-xs text-slate-400">Updates on your reports, repairs and payments</p>
+            <p className="text-xs text-slate-400">{isStaff ? 'Alerts and updates for your account' : 'Updates on your reports, repairs and payments'}</p>
           </div>
         </div>
 
@@ -97,7 +100,9 @@ export default function NotificationsPanel({ onOpenTab }: NotificationsPanelProp
             {filter === 'UNREAD' ? "You're all caught up" : 'No notifications yet'}
           </p>
           <p className="text-xs text-slate-500">
-            You'll be notified here when your reports, repairs or payments are updated.
+            {isStaff
+              ? "You'll be notified here when there is an update or alert for your account."
+              : "You'll be notified here when your reports, repairs or payments are updated."}
           </p>
         </div>
       ) : (
@@ -132,7 +137,7 @@ export default function NotificationsPanel({ onOpenTab }: NotificationsPanelProp
                     <div className="flex flex-wrap items-center gap-3 pt-0.5 text-[11px] text-slate-500">
                       <span className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold ${style.chip}`}>{style.label}</span>
                       <span title={new Date(n.createdAt).toLocaleString()}>{timeAgo(n.createdAt)}</span>
-                      {n.linkTab && (
+                      {n.linkTab && onOpenTab && (
                         <button
                           type="button"
                           onClick={() => {

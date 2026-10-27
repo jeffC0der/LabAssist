@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Monitor, User, AlertTriangle, Wifi, Sparkles, ArrowUpRight, X, ArrowLeft, CheckCircle2, Pencil } from 'lucide-react';
+import { Monitor, User, AlertTriangle, Sparkles, ArrowUpRight, X, ArrowLeft, CheckCircle2, Pencil } from 'lucide-react';
 import { LAB_ROOMS, type Workstation, type WorkstationStatus, type Ticket } from '@/lib/mockData';
 import { useWorkstations } from '@/context/WorkstationContext';
 import { useTickets } from '@/context/TicketContext';
@@ -323,9 +323,6 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
             <div>
               <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
                 Live Workstation Grid
-                <span className="px-2 py-0.5 text-[10px] uppercase font-mono font-bold tracking-wider rounded-md bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
-                  Interactive
-                </span>
               </h2>
               <p className="text-xs text-slate-400">
                 Click any PC station to inspect specs or prefill a failure ticket
@@ -614,16 +611,9 @@ export default function WorkstationGrid({ onSelectStation, onPrefillTicket, sele
               </div>
 
               <div className="grid grid-cols-2 gap-2 text-xs bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
-                <div>
+                <div className="col-span-2">
                   <span className="text-slate-500 block">Hardware Specs</span>
                   <span className="text-slate-200 font-medium">{liveModalStation.specs}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block">Telemetry Latency</span>
-                  <span className="text-slate-200 font-mono flex items-center gap-1">
-                    <Wifi size={11} className="text-emerald-400" />
-                    {liveModalStation.lastPing}
-                  </span>
                 </div>
                 {liveModalStation.user && (
                   <div className="col-span-2 pt-2 border-t border-slate-700/40">

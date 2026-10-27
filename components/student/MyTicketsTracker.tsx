@@ -65,7 +65,7 @@ export default function MyTicketsTracker() {
             <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
               My Tickets Tracker
               <span className="px-2 py-0.5 text-[10px] uppercase font-mono font-bold tracking-wider rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                Live Status
+                Live
               </span>
             </h2>
             <p className="text-xs text-slate-400">

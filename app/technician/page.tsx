@@ -9,11 +9,13 @@ import { useTickets } from '@/context/TicketContext';
 import { useWorkstations } from '@/context/WorkstationContext';
 import { useRepairs } from '@/context/RepairContext';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
-import { Wrench, Monitor, ListOrdered, Sparkles, Layers, Shield, HardDrive } from 'lucide-react';
+import { Wrench, Monitor, ListOrdered, Sparkles, Layers, Shield, HardDrive, Bell } from 'lucide-react';
+import NotificationsPanel from '@/components/student/NotificationsPanel';
+import { useNotifications, OPEN_PORTAL_TAB_EVENT } from '@/context/NotificationContext';
 import PcInventory from '@/components/dashboard/PcInventory';
 import TicketQueueSection from '@/components/dashboard/TicketQueueSection';
 
-export type TechnicianTab = 'PC_DISPLAY' | 'DISPATCH_QUEUE' | 'REPAIRS' | 'INVENTORY';
+export type TechnicianTab = 'PC_DISPLAY' | 'DISPATCH_QUEUE' | 'REPAIRS' | 'INVENTORY' | 'NOTIFICATIONS';
 
 interface TabItem {
   id: TechnicianTab;
@@ -30,6 +32,17 @@ export default function TechnicianPage() {
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState<TechnicianTab>('DISPATCH_QUEUE');
+  const { unreadCount } = useNotifications();
+
+  // Open the full notifications list from the bell ("Show All") or a ?tab=NOTIFICATIONS link
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('tab') === 'NOTIFICATIONS') setActiveTab('NOTIFICATIONS');
+    const onOpenTab = (e: Event) => {
+      if ((e as CustomEvent).detail === 'NOTIFICATIONS') setActiveTab('NOTIFICATIONS');
+    };
+    window.addEventListener(OPEN_PORTAL_TAB_EVENT, onOpenTab);
+    return () => window.removeEventListener(OPEN_PORTAL_TAB_EVENT, onOpenTab);
+  }, []);
 
   const isAuthorized = isAuthenticated && role === 'TECHNICIAN';
 
@@ -86,6 +99,12 @@ export default function TechnicianPage() {
       icon: <HardDrive size={15} />,
       badge: `${allStations.length} PCs`,
     },
+    {
+      id: 'NOTIFICATIONS',
+      label: 'Notifications',
+      icon: <Bell size={15} />,
+      badge: unreadCount > 0 ? `${unreadCount} New` : 'All read',
+    },
   ];
 
   return (
@@ -136,7 +155,7 @@ export default function TechnicianPage() {
                 className="flex flex-row lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible"
                 aria-label="Technician Board Sections"
               >
-                {tabs.map((tab) => {
+                {tabs.filter((tab) => tab.id !== 'NOTIFICATIONS').map((tab) => {
                   const isActive = activeTab === tab.id;
                   return (
                     <button
@@ -210,6 +229,12 @@ export default function TechnicianPage() {
               </section>
             )}
 
+            {activeTab === 'NOTIFICATIONS' && (
+              <section aria-label="Notifications" className="animate-fade-in">
+                <NotificationsPanel audience="staff" />
+              </section>
+            )}
+
             {activeTab === 'REPAIRS' && (
               <section aria-label="Repairs Workbench & Job Cards" className="animate-fade-in">
                 <TechnicianRepairsWorkbench />
@@ -220,11 +245,7 @@ export default function TechnicianPage() {
 
         {/* Global Footer */}
         <div className="mt-12 pt-4 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-600">
-          <span>LabAssist IT Operations · Campus Field Technicians</span>
-          <span className="flex items-center gap-1.5 font-mono text-slate-500">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            Active Dispatch Queue: 0.8s SLA
-          </span>
+          <span>UMak LabAssist · University of Makati</span>
         </div>
       </div>
     </main>

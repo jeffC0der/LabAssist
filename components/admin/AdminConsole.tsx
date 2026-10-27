@@ -1,23 +1,36 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import TelemetryFleetDiagnostics from './TelemetryFleetDiagnostics';
 import FailureAnalytics from './FailureAnalytics';
 import RevenueAnalytics from './RevenueAnalytics';
 import UserAccessControl from './UserAccessControl';
 import LabStationManager from './LabStationManager';
 import WorkstationGrid from '@/components/student/WorkstationGrid';
-import { Shield, Radio, BarChart3, DollarSign, Users, Layers, Sparkles, ListOrdered, Monitor, HardDrive } from 'lucide-react';
+import { Shield, Radio, BarChart3, DollarSign, Users, Layers, Sparkles, ListOrdered, Monitor, HardDrive, Bell } from 'lucide-react';
+import NotificationsPanel from '@/components/student/NotificationsPanel';
+import { useNotifications, OPEN_PORTAL_TAB_EVENT } from '@/context/NotificationContext';
 import PcInventory from '@/components/dashboard/PcInventory';
 import { useTickets } from '@/context/TicketContext';
 import { useWorkstations } from '@/context/WorkstationContext';
 import TicketQueueSection from '@/components/dashboard/TicketQueueSection';
 
-type AdminTab = 'WORKSTATIONS' | 'TICKETS' | 'FLEET' | 'ANALYTICS' | 'REVENUE' | 'RBAC' | 'ROOMS' | 'INVENTORY';
+type AdminTab = 'WORKSTATIONS' | 'TICKETS' | 'FLEET' | 'ANALYTICS' | 'REVENUE' | 'RBAC' | 'ROOMS' | 'INVENTORY' | 'NOTIFICATIONS';
 
 export default function AdminConsole() {
   const { tickets } = useTickets();
   const { workstations } = useWorkstations();
   const [activeTab, setActiveTab] = useState<AdminTab>('WORKSTATIONS');
+  const { unreadCount } = useNotifications();
+
+  // Open the full notifications list from the bell ("Show All") or a ?tab=NOTIFICATIONS link
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('tab') === 'NOTIFICATIONS') setActiveTab('NOTIFICATIONS');
+    const onOpenTab = (e: Event) => {
+      if ((e as CustomEvent).detail === 'NOTIFICATIONS') setActiveTab('NOTIFICATIONS');
+    };
+    window.addEventListener(OPEN_PORTAL_TAB_EVENT, onOpenTab);
+    return () => window.removeEventListener(OPEN_PORTAL_TAB_EVENT, onOpenTab);
+  }, []);
 
   const pendingCount = tickets.filter(t => t.status === 'PENDING').length;
   const dispatchedCount = tickets.filter(t => t.status === 'DISPATCHED').length;
@@ -39,10 +52,11 @@ export default function AdminConsole() {
     },
     { id: 'FLEET', label: 'ESP32 Fleet Telemetry', icon: <Radio size={15} />, badge: '6 Nodes Live' },
     { id: 'ANALYTICS', label: 'Failure Analytics', icon: <BarChart3 size={15} />, badge: `${tickets.length} Incidents` },
-    { id: 'REVENUE', label: 'Revenue Analytics', icon: <DollarSign size={15} />, badge: 'Live Ledger' },
-    { id: 'RBAC', label: 'User & Access Control', icon: <Users size={15} />, badge: 'Live DB' },
+    { id: 'REVENUE', label: 'Revenue Analytics', icon: <DollarSign size={15} />, badge: 'Live' },
+    { id: 'RBAC', label: 'User & Access Control', icon: <Users size={15} />, badge: 'Live' },
     { id: 'ROOMS', label: 'Lab & Station Manager', icon: <Layers size={15} />, badge: '5 Labs' },
     { id: 'INVENTORY', label: 'PC Inventory', icon: <HardDrive size={15} />, badge: `${allStations.length} PCs` },
+    { id: 'NOTIFICATIONS', label: 'Notifications', icon: <Bell size={15} />, badge: unreadCount > 0 ? `${unreadCount} New` : 'All read' },
   ];
 
   return (
@@ -83,7 +97,7 @@ export default function AdminConsole() {
               className="flex flex-row lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible"
               aria-label="Admin Console Sections"
             >
-              {adminTabs.map((tab) => {
+              {adminTabs.filter((tab) => tab.id !== 'NOTIFICATIONS').map((tab) => {
                 const isActive = activeTab === tab.id;
                 return (
                   <button
@@ -155,6 +169,7 @@ export default function AdminConsole() {
           {activeTab === 'RBAC' && <UserAccessControl />}
           {activeTab === 'ROOMS' && <LabStationManager />}
           {activeTab === 'INVENTORY' && <PcInventory />}
+          {activeTab === 'NOTIFICATIONS' && <NotificationsPanel audience="staff" />}
         </div>
       </div>
     </div>

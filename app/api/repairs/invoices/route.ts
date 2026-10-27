@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { sendInvoiceNotificationEmail } from '@/lib/emailService';
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 import { notifyUser, formatPeso } from '@/lib/notifications';
+import { WORK_SCOPE_MAX } from '@/lib/repairLimits';
 import { errorResponse, readJson, optStr, optOneOf, optNum, optEmail, ValidationError, PATTERNS } from '@/lib/validation';
 import {
   getInMemoryInvoice,
@@ -197,7 +198,7 @@ function repairInvoiceRowToInvoice(row: any) {
 
 // ── GET: Fetch invoice and invoice items for a Job Order ──
 export async function GET(request: Request) {
-  const auth = await requireAuth(request, STAFF_ROLES);
+  const auth = await requireAuth(request);
   if (auth.response) return auth.response;
 
   const { searchParams } = new URL(request.url);
@@ -205,6 +206,20 @@ export async function GET(request: Request) {
   const jobOrderNumber = searchParams.get('jobOrderNumber') || searchParams.get('rmaNumber');
 
   const supabase = getSupabaseAdmin();
+
+  // Students may read the invoice of their OWN repair only (for their receipt and invoice view)
+  if (!STAFF_ROLES.includes(auth.user.role)) {
+    if (!jobOrderNumber || jobOrderId || !/^[A-Z0-9][A-Z0-9-]{2,39}$/i.test(jobOrderNumber) || !supabase) {
+      return NextResponse.json({ error: 'You do not have permission to do this.' }, { status: 403 });
+    }
+    const { data: own } = await supabase
+      .from('device_repairs')
+      .select('user_id, client_email')
+      .eq('rma_number', jobOrderNumber)
+      .maybeSingle();
+    const isOwner = !!own && (own.user_id === auth.user.id || (own.client_email || '').toLowerCase() === auth.user.email);
+    if (!isOwner) return NextResponse.json({ error: 'You do not have permission to do this.' }, { status: 403 });
+  }
   if (!supabase) {
     const fallback = jobOrderNumber ? inMemoryInvoices[jobOrderNumber] : null;
     return NextResponse.json({
@@ -266,7 +281,7 @@ export async function GET(request: Request) {
             clientEmail: devRepair.client_email,
             deviceModel: devRepair.device_model,
             serialNumber: devRepair.serial_number,
-            assignedTechnician: devRepair.technician_name || 'Tech. Alex Torres',
+            assignedTechnician: devRepair.technician_name || 'Unassigned',
             totalAmount: Number(devRepair.total_amount || 0),
             amountPaid: Number(devRepair.amount_paid || 0),
             onlinePaymentReference: devRepair.online_payment_reference,
@@ -327,7 +342,7 @@ export async function GET(request: Request) {
       clientEmail: req?.client_email,
       deviceModel: req?.device_model || 'Device',
       serialNumber: req?.serial_number || 'N/A',
-      assignedTechnician: 'Tech. Alex Torres',
+      assignedTechnician: 'Unassigned',
       totalAmount: Number(invoice.total_amount || 0),
       amountPaid: Number(invoice.amount_paid || 0),
       onlinePaymentReference: invoice.online_payment_reference,
@@ -371,7 +386,7 @@ export async function POST(request: Request) {
       if (!Array.isArray(body.items) || body.items.length > 50) throw new ValidationError('Invoice items must be a list of up to 50 items.');
       body.items.forEach((it: any, i: number) => {
         if (!it || typeof it !== 'object') throw new ValidationError(`Invoice item ${i + 1} is invalid.`);
-        optStr(it.workScope, `Item ${i + 1} scope`, { max: 60 });
+        optStr(it.workScope, `Item ${i + 1} scope`, { max: WORK_SCOPE_MAX });
         optStr(it.itemName, `Item ${i + 1} name`, { max: 120 });
         optNum(it.quantity, `Item ${i + 1} quantity`, { min: 0, max: 999, integer: true });
         optNum(it.unitCost, `Item ${i + 1} unit cost`, { min: 0, max: 1_000_000 });
@@ -511,7 +526,7 @@ export async function POST(request: Request) {
     let resolvedClientName = clientName || inMemoryInvoices[joNum]?.clientName || 'UMak Student / Faculty';
     let resolvedDevice = deviceModel || inMemoryInvoices[joNum]?.deviceModel || 'Hardware Unit';
     let resolvedSerial = serialNumber || inMemoryInvoices[joNum]?.serialNumber || 'N/A';
-    let resolvedTechnician = assignedTechnician || inMemoryInvoices[joNum]?.assignedTechnician || 'Tech. Alex Torres';
+    let resolvedTechnician = assignedTechnician || inMemoryInvoices[joNum]?.assignedTechnician || 'Unassigned';
 
     if (supabase) {
       try {
