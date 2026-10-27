@@ -25,7 +25,150 @@ interface TicketRowProps {
   onShowCredentials: (t: Ticket) => void;
 }
 
-function TicketRow({ ticket, onViewDetails, onOpenDispatchModal, onConfirmRepair, onResolveTicket, onShowCredentials }: TicketRowProps) {
+// The next-step button for a ticket's stage, plus details and PC credentials. Shared by the table row and
+// the phone card; `wide` stretches the main button across the card.
+function TicketActions({ ticket, onViewDetails, onOpenDispatchModal, onConfirmRepair, onResolveTicket, onShowCredentials, wide = false }: TicketRowProps & { wide?: boolean }) {
+  const mainBtn = `${wide ? 'flex-1 justify-center py-2' : 'py-1.5'} px-3 text-xs font-bold rounded-lg transition-all whitespace-nowrap flex items-center gap-1.5`;
+  const iconBtn = wide ? 'p-2.5' : 'p-1.5';
+  return (
+    <div className={`flex items-center ${wide ? 'gap-2' : 'gap-1.5'}`}>
+      {/* Stage 1: PENDING -> Dispatch button (Yellow station) */}
+      {ticket.status === 'PENDING' && (
+        <button
+          id={wide ? undefined : `dispatch-${ticket.ticket_id}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenDispatchModal(ticket);
+          }}
+          className={`${mainBtn} bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/25 hover:text-amber-200 shadow-[0_0_10px_rgba(245,158,11,0.15)]`}
+          aria-label={`Dispatch technician for ${ticket.ticket_id}`}
+        >
+          <Wrench size={12} className="text-amber-400" />
+          <span>Dispatch</span>
+        </button>
+      )}
+
+      {/* Stage 2: DISPATCHED -> Confirm Repair button (Changes station display to Red Under Repair) */}
+      {ticket.status === 'DISPATCHED' && (
+        <button
+          id={wide ? undefined : `confirm-repair-${ticket.ticket_id}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onConfirmRepair(ticket);
+          }}
+          className={`${mainBtn} bg-rose-500/15 text-rose-300 border border-rose-500/40 hover:bg-rose-500/25 hover:text-rose-200 shadow-[0_0_10px_rgba(244,63,94,0.15)]`}
+          aria-label={`Confirm repair for ${ticket.ticket_id}`}
+          title="Click to confirm repair and mark station as Under Repair"
+        >
+          <Wrench size={13} className="text-rose-400" />
+          <span>Confirm Repair</span>
+        </button>
+      )}
+
+      {/* Stage 3: UNDER_REPAIR -> Mark Resolved button (Returns station to Green Online) */}
+      {ticket.status === 'UNDER_REPAIR' && (
+        <button
+          id={wide ? undefined : `resolve-${ticket.ticket_id}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onResolveTicket(ticket);
+          }}
+          className={`${mainBtn} bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/25 hover:text-emerald-200 shadow-[0_0_10px_rgba(16,185,129,0.15)]`}
+          aria-label={`Mark ${ticket.ticket_id} as resolved`}
+          title="Click to resolve ticket and restore station to Online"
+        >
+          <CheckCircle size={13} className="text-emerald-400" />
+          <span>Mark Resolved</span>
+        </button>
+      )}
+
+      {/* Stage 4: RESOLVED -> Completed pill */}
+      {ticket.status === 'RESOLVED' && (
+        <span className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-slate-800 text-slate-400 border border-slate-700/60 inline-flex items-center gap-1 ${wide ? 'flex-1 justify-center py-2' : ''}`}>
+          <CheckCircle size={11} className="text-emerald-500" />
+          Resolved
+        </span>
+      )}
+
+      <button
+        id={wide ? undefined : `view-${ticket.ticket_id}`}
+        onClick={(e) => { e.stopPropagation(); onViewDetails(ticket); }}
+        className={`${iconBtn} rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-700 transition-all ${wide ? 'border border-slate-700/60' : 'ml-1'}`}
+        aria-label={`View details for ${ticket.ticket_id}`}
+        title="View Details"
+      >
+        <ExternalLink size={14} aria-hidden="true" />
+      </button>
+
+      {/* PC admin credentials (same security as the PC Credentials tab) */}
+      <button
+        id={wide ? undefined : `creds-${ticket.ticket_id}`}
+        onClick={(e) => { e.stopPropagation(); onShowCredentials(ticket); }}
+        className={`${iconBtn} rounded-lg text-rose-300/70 hover:text-rose-200 hover:bg-rose-500/10 transition-all ${wide ? 'border border-rose-500/20' : ''}`}
+        aria-label={`Show admin credentials for ${ticket.lab_id} ${ticket.pc_num}`}
+        title="Show PC admin credentials"
+      >
+        <KeyRound size={14} aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+// Phones: one card per ticket instead of a wide table that has to be scrolled sideways
+function TicketCard(props: TicketRowProps) {
+  const { ticket, onViewDetails } = props;
+  const catColors    = getCategoryColors(ticket.category);
+  const statusColors = getStatusColors(ticket.status);
+  const prioColors   = getPriorityColors(ticket.priority);
+
+  return (
+    <li
+      className="ticket-row p-4 border-b border-slate-700/40 last:border-b-0 animate-ticket-in cursor-pointer"
+      onClick={() => onViewDetails(ticket)}
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onViewDetails(ticket); }}
+      aria-label={`Ticket ${ticket.ticket_id}: ${ticket.category} at ${ticket.lab_id} ${ticket.pc_num}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-mono text-xs font-semibold text-indigo-400">{ticket.ticket_id}</p>
+          <p className="text-sm font-bold text-slate-100 mt-0.5">
+            {ticket.lab_id} <span className="text-slate-500 font-normal">·</span> <span className="font-mono">{ticket.pc_num}</span>
+          </p>
+        </div>
+        <span className={`flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${statusColors.bg} ${statusColors.text} ${statusColors.border}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${statusColors.text.replace('text-', 'bg-')} ${ticket.status === 'PENDING' || ticket.status === 'DISPATCHED' ? 'animate-pulse' : ''}`} aria-hidden="true" />
+          {ticket.status === 'UNDER_REPAIR' ? 'UNDER REPAIR' : ticket.status}
+        </span>
+      </div>
+
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg font-semibold border ${catColors.bg} ${catColors.text} ${catColors.border}`}>
+          {CATEGORY_ICONS[ticket.category]}
+          [{ticket.key}] {ticket.category}
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className={`w-1.5 h-1.5 rounded-full ${prioColors.dot}`} aria-hidden="true" />
+          <span className={`font-semibold ${prioColors.text}`}>{ticket.priority}</span>
+        </span>
+        <span className="text-slate-500">{formatTimestamp(ticket.timestamp)}</span>
+        {ticket.assignee && (
+          <span className="inline-flex items-center gap-1 text-slate-300">
+            <User size={11} className="text-indigo-400" aria-hidden="true" />
+            {ticket.assignee}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+        <TicketActions {...props} wide />
+      </div>
+    </li>
+  );
+}
+
+function TicketRow(props: TicketRowProps) {
+  const { ticket, onViewDetails } = props;
   const catColors    = getCategoryColors(ticket.category);
   const statusColors = getStatusColors(ticket.status);
   const prioColors   = getPriorityColors(ticket.priority);
@@ -40,12 +183,12 @@ function TicketRow({ ticket, onViewDetails, onOpenDispatchModal, onConfirmRepair
       aria-label={`Ticket ${ticket.ticket_id}: ${ticket.category} at ${ticket.lab_id} ${ticket.pc_num}`}
     >
       {/* Ticket ID */}
-      <td className="px-4 py-3.5 whitespace-nowrap">
+      <td className="px-3 py-3.5 whitespace-nowrap">
         <span className="font-mono text-xs font-semibold text-indigo-400">{ticket.ticket_id}</span>
       </td>
 
       {/* Lab / PC */}
-      <td className="px-4 py-3.5 whitespace-nowrap">
+      <td className="px-3 py-3.5 whitespace-nowrap">
         <div>
           <p className="text-xs font-semibold text-slate-200">{ticket.lab_id}</p>
           <p className="text-xs text-slate-500 font-mono">{ticket.pc_num}</p>
@@ -53,7 +196,7 @@ function TicketRow({ ticket, onViewDetails, onOpenDispatchModal, onConfirmRepair
       </td>
 
       {/* Category */}
-      <td className="px-4 py-3.5 whitespace-nowrap">
+      <td className="px-3 py-3.5 whitespace-nowrap">
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border ${catColors.bg} ${catColors.text} ${catColors.border}`}>
           {CATEGORY_ICONS[ticket.category]}
           <span className="hidden sm:inline">[{ticket.key}]</span>
@@ -63,7 +206,7 @@ function TicketRow({ ticket, onViewDetails, onOpenDispatchModal, onConfirmRepair
       </td>
 
       {/* Priority */}
-      <td className="px-4 py-3.5 whitespace-nowrap hidden md:table-cell">
+      <td className="px-3 py-3.5 whitespace-nowrap hidden md:table-cell">
         <div className="flex items-center gap-1.5">
           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${prioColors.dot}`} aria-hidden="true" />
           <span className={`text-xs font-semibold ${prioColors.text}`}>{ticket.priority}</span>
@@ -71,7 +214,7 @@ function TicketRow({ ticket, onViewDetails, onOpenDispatchModal, onConfirmRepair
       </td>
 
       {/* Status */}
-      <td className="px-4 py-3.5 whitespace-nowrap">
+      <td className="px-3 py-3.5 whitespace-nowrap">
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${statusColors.bg} ${statusColors.text} ${statusColors.border}`}>
           <span className={`w-1.5 h-1.5 rounded-full ${statusColors.text.replace('text-', 'bg-')} ${ticket.status === 'PENDING' || ticket.status === 'DISPATCHED' ? 'animate-pulse' : ''}`} aria-hidden="true" />
           {ticket.status === 'UNDER_REPAIR' ? 'UNDER REPAIR' : ticket.status}
@@ -79,12 +222,12 @@ function TicketRow({ ticket, onViewDetails, onOpenDispatchModal, onConfirmRepair
       </td>
 
       {/* Time */}
-      <td className="px-4 py-3.5 whitespace-nowrap hidden sm:table-cell">
+      <td className="px-3 py-3.5 whitespace-nowrap hidden sm:table-cell">
         <span className="text-xs text-slate-500">{formatTimestamp(ticket.timestamp)}</span>
       </td>
 
       {/* Assignee */}
-      <td className="px-4 py-3.5 whitespace-nowrap hidden lg:table-cell">
+      <td className="px-3 py-3.5 whitespace-nowrap hidden lg:table-cell">
         {ticket.assignee ? (
           <div className="flex items-center gap-1.5">
             <div className="w-5 h-5 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center flex-shrink-0" aria-hidden="true">
@@ -98,87 +241,8 @@ function TicketRow({ ticket, onViewDetails, onOpenDispatchModal, onConfirmRepair
       </td>
 
       {/* Actions */}
-      <td className="px-4 py-3.5 whitespace-nowrap" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-1.5">
-          {/* Stage 1: PENDING -> Dispatch button (Yellow station) */}
-          {ticket.status === 'PENDING' && (
-            <button
-              id={`dispatch-${ticket.ticket_id}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenDispatchModal(ticket);
-              }}
-              className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/25 hover:text-amber-200 transition-all whitespace-nowrap flex items-center gap-1.5 shadow-[0_0_10px_rgba(245,158,11,0.15)]"
-              aria-label={`Dispatch technician for ${ticket.ticket_id}`}
-            >
-              <Wrench size={12} className="text-amber-400" />
-              <span>Dispatch</span>
-            </button>
-          )}
-
-          {/* Stage 2: DISPATCHED -> Confirm Repair button (Changes station display to Red Under Repair) */}
-          {ticket.status === 'DISPATCHED' && (
-            <button
-              id={`confirm-repair-${ticket.ticket_id}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onConfirmRepair(ticket);
-              }}
-              className="px-3 py-1.5 text-xs font-bold rounded-lg bg-rose-500/15 text-rose-300 border border-rose-500/40 hover:bg-rose-500/25 hover:text-rose-200 transition-all whitespace-nowrap flex items-center gap-1.5 shadow-[0_0_10px_rgba(244,63,94,0.15)]"
-              aria-label={`Confirm repair for ${ticket.ticket_id}`}
-              title="Click to confirm repair and mark station as Under Repair"
-            >
-              <Wrench size={13} className="text-rose-400" />
-              <span>Confirm Repair</span>
-            </button>
-          )}
-
-          {/* Stage 3: UNDER_REPAIR -> Mark Resolved button (Returns station to Green Online) */}
-          {ticket.status === 'UNDER_REPAIR' && (
-            <button
-              id={`resolve-${ticket.ticket_id}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onResolveTicket(ticket);
-              }}
-              className="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/25 hover:text-emerald-200 transition-all whitespace-nowrap flex items-center gap-1.5 shadow-[0_0_10px_rgba(16,185,129,0.15)]"
-              aria-label={`Mark ${ticket.ticket_id} as resolved`}
-              title="Click to resolve ticket and restore station to Online"
-            >
-              <CheckCircle size={13} className="text-emerald-400" />
-              <span>Mark Resolved</span>
-            </button>
-          )}
-
-          {/* Stage 4: RESOLVED -> Completed pill */}
-          {ticket.status === 'RESOLVED' && (
-            <span className="px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-slate-800 text-slate-400 border border-slate-700/60 inline-flex items-center gap-1">
-              <CheckCircle size={11} className="text-emerald-500" />
-              Resolved
-            </span>
-          )}
-
-          <button
-            id={`view-${ticket.ticket_id}`}
-            onClick={(e) => { e.stopPropagation(); onViewDetails(ticket); }}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-700 transition-all ml-1"
-            aria-label={`View details for ${ticket.ticket_id}`}
-            title="View Details"
-          >
-            <ExternalLink size={14} aria-hidden="true" />
-          </button>
-
-          {/* PC admin credentials (same security as the PC Credentials tab) */}
-          <button
-            id={`creds-${ticket.ticket_id}`}
-            onClick={(e) => { e.stopPropagation(); onShowCredentials(ticket); }}
-            className="p-1.5 rounded-lg text-rose-300/70 hover:text-rose-200 hover:bg-rose-500/10 transition-all"
-            aria-label={`Show admin credentials for ${ticket.lab_id} ${ticket.pc_num}`}
-            title="Show PC admin credentials"
-          >
-            <KeyRound size={14} aria-hidden="true" />
-          </button>
-        </div>
+      <td className="px-3 py-3.5 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+        <TicketActions {...props} />
       </td>
     </tr>
   );
@@ -239,18 +303,21 @@ export default function TicketTable({ scope }: TicketTableProps = {}) {
     <>
       <div className="glass rounded-2xl overflow-hidden">
         {/* Table heading */}
-        <div className="px-5 py-4 border-b border-slate-700/50 flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+        <div className="px-4 sm:px-5 py-4 border-b border-slate-700/50 flex items-start sm:items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold text-slate-200 flex flex-wrap items-center gap-2">
               <span>Ticket Queue</span>
               <span className="px-2 py-0.5 text-[10px] font-mono font-bold uppercase rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
                 Live Operations
               </span>
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">Click any row to inspect symptoms or manage technician dispatching</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              <span className="xl:hidden">Tap a ticket to see its symptoms and history</span>
+              <span className="hidden xl:inline">Click any row to inspect symptoms or manage technician dispatching</span>
+            </p>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1.5 text-xs text-slate-500">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="flex items-center gap-1.5 text-xs text-slate-500 whitespace-nowrap">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" aria-hidden="true" />
               {filteredTickets.filter(t => t.status === 'PENDING').length} pending
             </span>
@@ -264,19 +331,34 @@ export default function TicketTable({ scope }: TicketTableProps = {}) {
             <p className="text-xs text-slate-600">Try adjusting your search or filter criteria</p>
           </div>
         ) : (
-          <div className="table-wrapper">
+          <>
+          {/* Phones, tablets and small laptops: ticket cards (the full table needs ~1280px) */}
+          <ul className="xl:hidden" aria-label="Ticket queue">
+            {filteredTickets.map((ticket) => (
+              <TicketCard
+                key={ticket.ticket_id}
+                ticket={ticket}
+                onViewDetails={setSelectedTicket}
+                onOpenDispatchModal={setTicketToDispatch}
+                onConfirmRepair={handleConfirmRepair}
+                onResolveTicket={handleResolveTicket}
+                onShowCredentials={setCredentialTicket}
+              />
+            ))}
+          </ul>
+          <div className="table-wrapper hidden xl:block">
             <table className="w-full" role="table" aria-label="Ticket queue">
               <thead>
                 <tr className="border-b border-slate-700/50" role="row">
                   {[
-                    { id: 'col-id',       label: 'Ticket ID',  className: 'px-4 py-3 text-left' },
-                    { id: 'col-lab',      label: 'Lab / PC',   className: 'px-4 py-3 text-left' },
-                    { id: 'col-category', label: 'Category',   className: 'px-4 py-3 text-left' },
-                    { id: 'col-priority', label: 'Priority',   className: 'px-4 py-3 text-left hidden md:table-cell' },
-                    { id: 'col-status',   label: 'Status',     className: 'px-4 py-3 text-left' },
-                    { id: 'col-time',     label: 'Time',       className: 'px-4 py-3 text-left hidden sm:table-cell' },
-                    { id: 'col-assignee', label: 'Assignee',   className: 'px-4 py-3 text-left hidden lg:table-cell' },
-                    { id: 'col-actions',  label: 'Actions',    className: 'px-4 py-3 text-left' },
+                    { id: 'col-id',       label: 'Ticket ID',  className: 'px-3 py-3 text-left' },
+                    { id: 'col-lab',      label: 'Lab / PC',   className: 'px-3 py-3 text-left' },
+                    { id: 'col-category', label: 'Category',   className: 'px-3 py-3 text-left' },
+                    { id: 'col-priority', label: 'Priority',   className: 'px-3 py-3 text-left hidden md:table-cell' },
+                    { id: 'col-status',   label: 'Status',     className: 'px-3 py-3 text-left' },
+                    { id: 'col-time',     label: 'Time',       className: 'px-3 py-3 text-left hidden sm:table-cell' },
+                    { id: 'col-assignee', label: 'Assignee',   className: 'px-3 py-3 text-left hidden lg:table-cell' },
+                    { id: 'col-actions',  label: 'Actions',    className: 'px-3 py-3 text-left' },
                   ].map(col => (
                     <th
                       key={col.id}
@@ -303,6 +385,7 @@ export default function TicketTable({ scope }: TicketTableProps = {}) {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 

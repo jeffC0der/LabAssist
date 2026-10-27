@@ -25,7 +25,8 @@ export default function TicketQueueSection() {
 
   return (
     <div className="space-y-6">
-      <div className="flex gap-1.5 overflow-x-auto border-b border-slate-800/80" role="tablist" aria-label="Ticket queue views">
+      {/* Phones: the three tabs share the width evenly (no sideways scrolling) */}
+      <div className="grid grid-cols-3 sm:flex gap-1 sm:gap-1.5 border-b border-slate-800/80" role="tablist" aria-label="Ticket queue views">
         {tabs.map((t) => {
           const isActive = tab === t.id;
           return (
@@ -35,14 +36,22 @@ export default function TicketQueueSection() {
               role="tab"
               aria-selected={isActive}
               onClick={() => setTab(t.id)}
-              className={`flex-shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-t-xl border-b-2 text-xs font-bold transition-colors ${
+              className={`min-w-0 flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2 px-1.5 sm:px-4 py-2.5 rounded-t-xl border-b-2 text-xs font-bold transition-colors ${
                 isActive ? t.active : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`}
             >
-              {t.icon}
-              <span>{t.label}</span>
+              <span className="flex-shrink-0">{t.icon}</span>
+              <span className="truncate">
+                {t.id === 'CREDENTIALS' ? (
+                  <>
+                    <span className="hidden sm:inline">PC </span>Credentials
+                  </>
+                ) : (
+                  t.label
+                )}
+              </span>
               {t.count !== undefined && (
-                <span className={`px-1.5 rounded-md font-mono text-[10px] ${isActive ? 'bg-white/10' : 'bg-slate-800 text-slate-500'}`}>
+                <span className={`flex-shrink-0 px-1.5 rounded-md font-mono text-[10px] ${isActive ? 'bg-white/10' : 'bg-slate-800 text-slate-500'}`}>
                   {t.count}
                 </span>
               )}

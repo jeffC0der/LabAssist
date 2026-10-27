@@ -151,8 +151,9 @@ export default function TechnicianPage() {
                 <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
               </div>
 
+              {/* Phones: 2-column tiles, tablets: one row of 4, desktop: vertical menu (no sideways scrolling) */}
               <nav
-                className="flex flex-row lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible"
+                className="grid grid-cols-2 sm:grid-cols-4 lg:flex lg:flex-col gap-1.5"
                 aria-label="Technician Board Sections"
               >
                 {tabs.filter((tab) => tab.id !== 'NOTIFICATIONS').map((tab) => {
@@ -163,10 +164,10 @@ export default function TechnicianPage() {
                       type="button"
                       onClick={() => setActiveTab(tab.id)}
                       aria-current={isActive ? 'page' : undefined}
-                      className={`group relative flex-shrink-0 lg:w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-all duration-200 ${
+                      className={`group relative w-full min-w-0 flex items-center gap-2.5 lg:gap-3 px-2.5 lg:px-3 py-2.5 rounded-xl border text-left transition-all duration-200 ${
                         isActive
                           ? 'bg-gradient-to-r from-indigo-500/20 to-purple-500/10 border-indigo-500/40 shadow-lg'
-                          : 'border-transparent text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                          : 'border-slate-800 bg-slate-900/40 lg:border-transparent lg:bg-transparent text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
                       }`}
                     >
                       <div
@@ -180,7 +181,7 @@ export default function TechnicianPage() {
                       </div>
                       <div className="min-w-0">
                         <span
-                          className={`block text-xs font-bold whitespace-nowrap lg:whitespace-normal ${
+                          className={`block text-xs font-bold leading-tight ${
                             isActive ? 'text-slate-50' : 'text-slate-200'
                           }`}
                         >
@@ -188,7 +189,7 @@ export default function TechnicianPage() {
                         </span>
                         {tab.badge && (
                           <span
-                            className={`block text-[10px] font-mono mt-0.5 whitespace-nowrap ${
+                            className={`block text-[10px] font-mono mt-0.5 truncate ${
                               isActive ? 'text-indigo-200' : 'text-slate-500'
                             }`}
                           >
@@ -197,9 +198,12 @@ export default function TechnicianPage() {
                         )}
                       </div>
 
-                      {/* Active accent bar */}
+                      {/* Active accent bar: left edge on desktop, top edge on the tiles */}
                       {isActive && (
-                        <span className="hidden lg:block absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-indigo-400" />
+                        <>
+                          <span className="hidden lg:block absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-indigo-400" />
+                          <span className="lg:hidden absolute top-0 left-3 right-3 h-1 rounded-b-full bg-indigo-400" />
+                        </>
                       )}
                     </button>
                   );

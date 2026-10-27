@@ -197,27 +197,48 @@ export default function StudentPortal() {
       <div className="flex flex-col lg:flex-row items-start gap-6">
         {/* ── Left Navigation Sidebar ─────────────────────────────── */}
         <aside className="w-full lg:w-72 xl:w-80 flex-shrink-0 space-y-4">
-          <div className="glass rounded-2xl p-3 sm:p-4 border border-slate-800/80 shadow-card">
-            <div className="px-3 pt-1 pb-3 text-[11px] font-mono uppercase tracking-wider text-slate-400 border-b border-slate-800/60 flex items-center justify-between">
+          <div className="glass rounded-2xl p-2 sm:p-3 lg:p-4 border border-slate-800/80 shadow-card">
+            <div className="hidden lg:flex px-3 pt-1 pb-3 text-[11px] font-mono uppercase tracking-wider text-slate-400 border-b border-slate-800/60 items-center justify-between">
               <span>Portal Navigation</span>
               <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
             </div>
 
-            {/* Navigation Tabs (Vertical on lg+, Horizontal row on mobile) */}
-            <nav className="mt-3 flex flex-row lg:flex-col gap-2" aria-label="Student Portal Sections">
+            {/* Navigation: 2 × 2 tiles on phones, one row of 4 on tablets, a vertical list on desktop */}
+            <nav className="lg:mt-3 grid grid-cols-2 sm:grid-cols-4 lg:flex lg:flex-col gap-2" aria-label="Student Portal Sections">
               {NAV_TABS.filter((tab) => tab.id !== 'NOTIFICATIONS').map((tab) => {
                 const isActive = activeTab === tab.id;
+                const badge = tab.badge && tab.badge({ activeTicketCount, onlinePcCount, unreadNotificationCount });
                 return (
                   <button
                     key={tab.id}
                     type="button"
                     onClick={() => setActiveTab(tab.id)}
-                    className={`group relative w-full flex items-center justify-between p-3 sm:p-3.5 rounded-xl border text-left transition-all duration-200 ${
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`group relative w-full min-w-0 p-3 sm:p-3.5 rounded-xl border text-left transition-all duration-200 ${
                       isActive
                         ? `bg-gradient-to-r ${tab.activeColor} shadow-lg`
                         : 'bg-slate-900/40 hover:bg-slate-800/60 border-slate-800 text-slate-400 hover:text-slate-200'
                     }`}
                   >
+                    {/* Phones & tablets: icon and status on top, the full name underneath */}
+                    <div className="lg:hidden flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${
+                            isActive ? 'bg-slate-950/60 text-slate-50 shadow-inner' : 'bg-slate-800/70 text-slate-400'
+                          }`}
+                        >
+                          {tab.icon}
+                        </div>
+                        <span className="min-w-0 truncate">{badge}</span>
+                      </div>
+                      <span className={`text-[13px] font-bold leading-tight ${isActive ? 'text-slate-50' : 'text-slate-200'}`}>
+                        {tab.label}
+                      </span>
+                    </div>
+
+                    {/* Desktop: one row per section */}
+                    <div className="hidden lg:flex items-center justify-between">
                     <div className="flex items-center gap-3 min-w-0">
                       <div
                         className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
@@ -234,18 +255,22 @@ export default function StudentPortal() {
                     </div>
 
                     <div className="flex items-center gap-2 pl-2 flex-shrink-0">
-                      {tab.badge && tab.badge({ activeTicketCount, onlinePcCount, unreadNotificationCount })}
+                      {badge}
                       <ChevronRight
                         size={16}
-                        className={`hidden lg:block transition-transform duration-200 ${
+                        className={`transition-transform duration-200 ${
                           isActive ? 'text-slate-200 translate-x-0.5' : 'text-slate-600 group-hover:text-slate-400'
                         }`}
                       />
                     </div>
+                    </div>
 
-                    {/* Active Accent Bar on the Left */}
+                    {/* Active accent bar: left edge on desktop, top edge on the tiles */}
                     {isActive && (
-                      <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-cyan-400 shadow-glow-cyan" />
+                      <>
+                        <span className="hidden lg:block absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-cyan-400 shadow-glow-cyan" />
+                        <span className="lg:hidden absolute top-0 left-3 right-3 h-1 rounded-b-full bg-cyan-400 shadow-glow-cyan" />
+                      </>
                     )}
                   </button>
                 );
