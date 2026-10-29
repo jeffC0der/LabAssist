@@ -4,6 +4,7 @@ import { X, Monitor, Keyboard, Zap, Wifi, Clock, User, CheckCircle, AlertTriangl
 import type { Ticket } from '@/lib/mockData';
 import { getCategoryColors, getStatusColors, getPriorityColors, formatFullTimestamp } from '@/lib/utils';
 import ModalPortal from '@/components/shared/ModalPortal';
+import RepairPhotoGallery from '@/components/repairs/RepairPhotoGallery';
 
 interface ViewDetailsModalProps {
   ticket: Ticket;
@@ -96,6 +97,9 @@ export default function ViewDetailsModal({ ticket, onClose, onDispatch, onConfir
               {ticket.description}
             </p>
           </div>
+
+          {/* Photos the reporter attached (optional) */}
+          <RepairPhotoGallery ticketId={ticket.ticket_id} title="Photos from the reporter" />
 
           {/* Meta grid */}
           <div className="grid grid-cols-2 gap-3">

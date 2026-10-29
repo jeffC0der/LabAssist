@@ -3,6 +3,8 @@ import type { DeviceRepair } from '@/context/RepairContext';
 // ── Device release receipt: one builder shared by the technician and student views ──
 
 export interface ReceiptLineItem {
+  /** 'SERVICE_FEE' for the automated service fee line (lib/serviceFee.ts) */
+  kind?: string;
   workScope?: string;
   itemName?: string;
   quantity?: number;

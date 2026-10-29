@@ -28,6 +28,10 @@ import {
 import { toCsv, downloadCsv, datedFilename } from '@/lib/csvExport';
 import { useToast } from '@/context/ToastContext';
 import ModalPortal from '@/components/shared/ModalPortal';
+import ReleaseReceiptModal from '@/components/repairs/ReleaseReceiptModal';
+import { useRepairs } from '@/context/RepairContext';
+import { buildReleaseReceipt, fetchRepairInvoice, type ReleaseReceiptData } from '@/lib/releaseReceipt';
+import { SERVICE_FEE_MAX } from '@/lib/serviceFee';
 
 interface RevenueMetrics {
   grossRevenue: number;
@@ -40,6 +44,22 @@ interface RevenueMetrics {
   onlineTotal: number;
   cashPercentage: number;
   onlinePercentage: number;
+}
+
+interface RevenueBreakdown {
+  totalCollected: number;
+  serviceFeeIncome: number;
+  partsAndMaterials: number;
+  invoicesWithFee: number;
+}
+
+interface FeeSettings {
+  serviceFee: number;
+  updatedBy: string | null;
+  updatedAt: string | null;
+  setupRequired?: boolean;
+  setupHint?: string;
+  history?: Array<{ oldFee: number | null; newFee: number; changedBy: string; changedAt: string }>;
 }
 
 interface TechPerformance {
@@ -80,6 +100,14 @@ interface TransactionRecord {
 export default function RevenueAnalytics() {
   const toast = useToast();
   const [metrics, setMetrics] = useState<RevenueMetrics | null>(null);
+  const [breakdown, setBreakdown] = useState<RevenueBreakdown | null>(null);
+  const [feeSettings, setFeeSettings] = useState<FeeSettings | null>(null);
+  const [feeEditing, setFeeEditing] = useState(false);
+  const [feeDraft, setFeeDraft] = useState('');
+  const [feeSaving, setFeeSaving] = useState(false);
+  const { repairs } = useRepairs();
+  const [ledgerReceipt, setLedgerReceipt] = useState<ReleaseReceiptData | null>(null);
+  const [receiptLoadingFor, setReceiptLoadingFor] = useState<string | null>(null);
   const [technicians, setTechnicians] = useState<TechPerformance[]>([]);
   const [charts, setCharts] = useState<{
     daily: ChartDataPoint[];
@@ -120,6 +148,7 @@ export default function RevenueAnalytics() {
       if (!res.ok) throw new Error('Failed to load revenue data');
       const data = await res.json();
       setMetrics(data.metrics);
+      setBreakdown(data.breakdown || null);
       setTechnicians(data.technicianPerformance || []);
       setCharts(data.charts || { daily: [], weekly: [], monthly: [] });
       setTransactions(data.transactions || []);
@@ -135,6 +164,62 @@ export default function RevenueAnalytics() {
   useEffect(() => {
     fetchRevenueData();
   }, [fetchRevenueData]);
+
+  // ── Service fee (admin-set, added automatically to every new invoice) ────────
+  const loadFeeSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/billing/settings', { cache: 'no-store' });
+      if (res.ok) setFeeSettings(await res.json());
+    } catch {
+      // the card shows "not available" until it loads
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFeeSettings();
+  }, [loadFeeSettings]);
+
+  const saveServiceFee = async () => {
+    const fee = Number(feeDraft);
+    if (feeDraft.trim() === '' || !Number.isFinite(fee) || fee < 0 || fee > SERVICE_FEE_MAX) {
+      toast.warning('Invalid amount', `Enter a fee from ₱0 to ₱${SERVICE_FEE_MAX.toLocaleString()}.`);
+      return;
+    }
+    setFeeSaving(true);
+    try {
+      const res = await fetch('/api/billing/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serviceFee: fee }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not save the service fee.');
+      setFeeSettings(data);
+      setFeeEditing(false);
+      toast.success(
+        'Service fee updated',
+        fee > 0 ? `New invoices will include a ${fmtMoney(fee)} service fee.` : 'New invoices will not include a service fee.'
+      );
+    } catch (err: any) {
+      toast.error('Could not save', err.message);
+    } finally {
+      setFeeSaving(false);
+    }
+  };
+
+  // ── Receipts from the ledger (same document technicians and students see) ────
+  const repairByJob = useMemo(() => new Map(repairs.map((r) => [r.id, r])), [repairs]);
+  const openReceipt = async (jobOrderNumber: string) => {
+    const job = repairByJob.get(jobOrderNumber);
+    if (!job) return;
+    setReceiptLoadingFor(jobOrderNumber);
+    try {
+      const invoice = await fetchRepairInvoice(jobOrderNumber);
+      setLedgerReceipt(buildReleaseReceipt(job, invoice));
+    } finally {
+      setReceiptLoadingFor(null);
+    }
+  };
 
   // ── Record Payment Handler ───────────────────────────────────────────────────
   const handleRecordPayment = async (e: React.FormEvent) => {
@@ -363,6 +448,102 @@ export default function RevenueAnalytics() {
             <p className="text-[11px] text-slate-400 mt-2">
               {fmtMoney(metrics?.onlineTotal)} online · {fmtMoney(metrics?.cashTotal)} cash
             </p>
+          </div>
+        </div>
+
+        {/* ── Collections breakdown: total collected = service fee income + parts & materials ── */}
+        <div className="mt-5 pt-5 border-t border-slate-800/70 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" data-testid="revenue-breakdown">
+          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-700/70">
+            <span className="text-xs font-semibold text-slate-300">Total Collected</span>
+            <p className="text-2xl font-black text-slate-100 font-mono tracking-tight mt-1" data-kpi-value="total">
+              {fmtMoney(breakdown?.totalCollected)}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">Everything clients have paid</p>
+          </div>
+          <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-500/15 to-violet-500/5 border border-indigo-500/40">
+            <span className="text-xs font-semibold text-indigo-300">Service Fee Income</span>
+            <p className="text-2xl font-black text-indigo-200 font-mono tracking-tight mt-1" data-kpi-value="fee">
+              {fmtMoney(breakdown?.serviceFeeIncome)}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Kept by the lab · from {breakdown?.invoicesWithFee || 0} invoice{breakdown?.invoicesWithFee === 1 ? '' : 's'} with a fee
+            </p>
+          </div>
+          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-700/70">
+            <span className="text-xs font-semibold text-cyan-300">Parts &amp; Materials</span>
+            <p className="text-2xl font-black text-cyan-200 font-mono tracking-tight mt-1" data-kpi-value="parts">
+              {fmtMoney(breakdown?.partsAndMaterials)}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">Paid for parts, materials &amp; services</p>
+          </div>
+
+          {/* Service fee setting */}
+          <div className="p-4 rounded-xl bg-slate-900/60 border border-dashed border-indigo-500/40" data-testid="service-fee-card">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-300">Service Fee per Invoice</span>
+              {!feeEditing && feeSettings && !feeSettings.setupRequired && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFeeDraft(String(feeSettings.serviceFee));
+                    setFeeEditing(true);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-indigo-600/80 hover:bg-indigo-500 text-white text-[11px] font-semibold"
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+            {feeSettings?.setupRequired ? (
+              <p className="text-[11px] text-amber-300 mt-2">{feeSettings.setupHint}</p>
+            ) : feeEditing ? (
+              <div className="mt-2 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400 font-mono">₱</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={SERVICE_FEE_MAX}
+                    step="any"
+                    value={feeDraft}
+                    onChange={(e) => setFeeDraft(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 focus:border-indigo-500 text-slate-100 font-mono text-sm outline-none"
+                    aria-label="Service fee amount"
+                    autoFocus
+                  />
+                </div>
+                <p className="text-[10px] text-slate-500">Applies to new invoices only. Existing invoices keep the fee they were created with.</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={saveServiceFee}
+                    disabled={feeSaving}
+                    className="flex-1 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold disabled:opacity-50"
+                  >
+                    {feeSaving ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFeeEditing(false)}
+                    disabled={feeSaving}
+                    className="flex-1 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="text-2xl font-black text-slate-100 font-mono tracking-tight mt-1" data-kpi-value="fee-setting">
+                  {feeSettings ? (feeSettings.serviceFee > 0 ? fmtMoney(feeSettings.serviceFee) : 'None') : '—'}
+                </p>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  {feeSettings?.updatedAt && feeSettings.updatedBy
+                    ? `Changed by ${feeSettings.updatedBy} · ${new Date(feeSettings.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                    : 'Added automatically to every new invoice'}
+                </p>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -677,6 +858,18 @@ export default function RevenueAnalytics() {
                       <p className="text-[10px] text-slate-500">
                         {tx.invoiceNumber || tx.jobOrderNumber || 'Walk-in Settlement'}
                       </p>
+                      {/* Released repairs: open the same release receipt technicians and students see */}
+                      {tx.jobOrderNumber && repairByJob.get(tx.jobOrderNumber)?.status === 'COMPLETED' && (
+                        <button
+                          type="button"
+                          onClick={() => openReceipt(tx.jobOrderNumber!)}
+                          disabled={receiptLoadingFor === tx.jobOrderNumber}
+                          className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px] font-sans font-semibold text-emerald-300 disabled:opacity-50"
+                        >
+                          {receiptLoadingFor === tx.jobOrderNumber ? <Loader2 size={10} className="animate-spin" /> : <Receipt size={10} />}
+                          Receipt
+                        </button>
+                      )}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <p className="font-bold text-slate-200">{tx.clientName}</p>
@@ -726,6 +919,8 @@ export default function RevenueAnalytics() {
           </table>
         </div>
       </div>
+
+      {ledgerReceipt && <ReleaseReceiptModal receipt={ledgerReceipt} onClose={() => setLedgerReceipt(null)} />}
 
       {/* ── Record Payment Modal ────────────────────────────────────────────── */}
       {isRecordModalOpen && (

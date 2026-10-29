@@ -33,6 +33,8 @@ interface TabConfig {
   label: string;
   icon: React.ReactNode;
   activeColor: string;
+  /** Shown greyed out and can't be opened (placeholder sections) */
+  disabled?: boolean;
   badge?: (props: { activeTicketCount: number; onlinePcCount: number; unreadNotificationCount: number }) => React.ReactNode;
 }
 
@@ -64,6 +66,7 @@ const NAV_TABS: TabConfig[] = [
     id: 'HARDWARE_RENT',
     label: 'Hardware Rent',
     icon: <Cpu size={18} />,
+    disabled: true, // placeholder: not available yet
     activeColor: 'from-amber-500/20 to-orange-500/10 border-amber-500/40 text-amber-300',
     badge: () => (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
@@ -101,8 +104,9 @@ const NAV_TABS: TabConfig[] = [
   },
 ];
 
+// Disabled sections can't be opened from a link (?tab=) or the bell either
 const isStudentNavTab = (value: unknown): value is StudentNavTab =>
-  typeof value === 'string' && NAV_TABS.some((t) => t.id === value);
+  typeof value === 'string' && NAV_TABS.some((t) => t.id === value && !t.disabled);
 
 export default function StudentPortal() {
   const [activeTab, setActiveTab] = useState<StudentNavTab>('PC_STATION');
@@ -207,15 +211,27 @@ export default function StudentPortal() {
             <nav className="lg:mt-3 grid grid-cols-2 sm:grid-cols-4 lg:flex lg:flex-col gap-2" aria-label="Student Portal Sections">
               {NAV_TABS.filter((tab) => tab.id !== 'NOTIFICATIONS').map((tab) => {
                 const isActive = activeTab === tab.id;
-                const badge = tab.badge && tab.badge({ activeTicketCount, onlinePcCount, unreadNotificationCount });
+                const isDisabled = !!tab.disabled;
+                const badge = isDisabled ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-slate-800 text-slate-500 border border-slate-700">
+                    Coming soon
+                  </span>
+                ) : (
+                  tab.badge && tab.badge({ activeTicketCount, onlinePcCount, unreadNotificationCount })
+                );
                 return (
                   <button
                     key={tab.id}
                     type="button"
-                    onClick={() => setActiveTab(tab.id)}
+                    onClick={() => !isDisabled && setActiveTab(tab.id)}
+                    disabled={isDisabled}
+                    aria-disabled={isDisabled || undefined}
+                    title={isDisabled ? `${tab.label} is not available yet` : undefined}
                     aria-current={isActive ? 'page' : undefined}
                     className={`group relative w-full min-w-0 p-3 sm:p-3.5 rounded-xl border text-left transition-all duration-200 ${
-                      isActive
+                      isDisabled
+                        ? 'bg-slate-900/20 border-slate-800/60 opacity-50 grayscale cursor-not-allowed'
+                        : isActive
                         ? `bg-gradient-to-r ${tab.activeColor} shadow-lg`
                         : 'bg-slate-900/40 hover:bg-slate-800/60 border-slate-800 text-slate-400 hover:text-slate-200'
                     }`}
@@ -256,12 +272,14 @@ export default function StudentPortal() {
 
                     <div className="flex items-center gap-2 pl-2 flex-shrink-0">
                       {badge}
-                      <ChevronRight
-                        size={16}
-                        className={`transition-transform duration-200 ${
-                          isActive ? 'text-slate-200 translate-x-0.5' : 'text-slate-600 group-hover:text-slate-400'
-                        }`}
-                      />
+                      {!isDisabled && (
+                        <ChevronRight
+                          size={16}
+                          className={`transition-transform duration-200 ${
+                            isActive ? 'text-slate-200 translate-x-0.5' : 'text-slate-600 group-hover:text-slate-400'
+                          }`}
+                        />
+                      )}
                     </div>
                     </div>
 
@@ -278,7 +296,7 @@ export default function StudentPortal() {
             </nav>
           </div>
 
-          {/* Quick Selection Status & Hardware Hotkey helper card */}
+          {/* Quick Selection Status card */}
           <div className="glass rounded-2xl p-4 border border-slate-800/80 text-xs space-y-3 shadow-card hidden lg:block">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800/60">
               <span className="font-semibold text-slate-300 flex items-center gap-1.5">
@@ -338,31 +356,6 @@ export default function StudentPortal() {
                 Click on any PC in the PC Station tab to link it here.
               </p>
             )}
-
-            {/* Hotkey Reference */}
-            <div className="pt-2 border-t border-slate-800/60 space-y-1.5">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block">
-                ESP32 Hotkey Mapping
-              </span>
-              <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono">
-                <div className="p-1.5 rounded-lg bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-                  <span className="text-blue-400 font-bold">[A]</span>
-                  <span className="text-slate-400">Display</span>
-                </div>
-                <div className="p-1.5 rounded-lg bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-                  <span className="text-violet-400 font-bold">[B]</span>
-                  <span className="text-slate-400">Periph</span>
-                </div>
-                <div className="p-1.5 rounded-lg bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-                  <span className="text-red-400 font-bold">[C]</span>
-                  <span className="text-slate-400">Power</span>
-                </div>
-                <div className="p-1.5 rounded-lg bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-                  <span className="text-cyan-400 font-bold">[D]</span>
-                  <span className="text-slate-400">Network</span>
-                </div>
-              </div>
-            </div>
           </div>
         </aside>
 

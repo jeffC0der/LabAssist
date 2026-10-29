@@ -41,6 +41,21 @@ export async function preparePhoto(file: File): Promise<Blob> {
   }
 }
 
+/** Photos on one lab PC ticket */
+export const MAX_TICKET_PHOTOS = 3;
+
+/** Upload one prepared photo for a lab PC ticket. Throws with the server's message on failure. */
+export async function uploadTicketPhoto(ticketId: string, photo: Blob): Promise<void> {
+  const form = new FormData();
+  form.append('ticket', ticketId);
+  form.append('file', photo, 'photo');
+  const res = await fetch('/api/tickets/photos', { method: 'POST', body: form });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'The photo could not be uploaded.');
+  }
+}
+
 /** Upload one prepared photo for a repair. Throws with the server's message on failure. */
 export async function uploadRepairPhoto(rma: string, kind: PhotoKind, photo: Blob): Promise<void> {
   const form = new FormData();

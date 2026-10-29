@@ -6,6 +6,8 @@ import { useWorkstations } from '@/context/WorkstationContext';
 import { useToast } from '@/context/ToastContext';
 import { useAuth } from '@/context/AuthContext';
 import { LAB_ROOMS, type TicketCategory, type TicketKey, type Ticket } from '@/lib/mockData';
+import PhotoPicker, { type PickedPhoto } from '@/components/repairs/PhotoPicker';
+import { uploadTicketPhoto } from '@/lib/repairPhotos';
 
 interface TicketSubmissionFormProps {
   initialLab?: string;
@@ -85,6 +87,7 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
   const [isUrgent, setIsUrgent] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [studentName, setStudentName] = useState<string>(user?.name || user?.email?.split('@')[0] || 'Student Kiosk');
+  const [photos, setPhotos] = useState<PickedPhoto[]>([]);
 
   useEffect(() => {
     if (user?.name) {
@@ -194,9 +197,29 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
     const savedTicket = await addTicket(newTicket);
     if (onTicketCreated) onTicketCreated(savedTicket);
 
-    toast.success('Ticket Submitted Successfully', `${savedTicket.ticket_id} routed to the active IT Technician queue!`);
+    // Optional photos go on the saved ticket (the server may have given it a different number)
+    let photosFailed = 0;
+    let photoError = '';
+    for (const p of photos) {
+      try {
+        await uploadTicketPhoto(savedTicket.ticket_id, p.blob);
+      } catch (err: any) {
+        photosFailed++;
+        photoError = err.message;
+      }
+    }
 
-    // Reset description & keep lab context
+    toast.success('Ticket Submitted Successfully', `${savedTicket.ticket_id} routed to the active IT Technician queue!`);
+    if (photosFailed > 0) {
+      toast.warning(
+        `${photosFailed} photo${photosFailed === 1 ? '' : 's'} not attached`,
+        `${photoError} Your ticket was still submitted.`
+      );
+    }
+
+    // Reset description & photos, keep lab context
+    photos.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+    setPhotos([]);
     setDescription('');
     setIsUrgent(false);
     setIsSubmitting(false);
@@ -414,6 +437,15 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
           />
         </div>
 
+        {/* Optional photos (the error on screen, the broken part...) for the technician */}
+        <PhotoPicker
+          label="Photos of the problem"
+          hint="For example the error on screen or the broken key or cable. Only you and the technicians can see them."
+          photos={photos}
+          onChange={setPhotos}
+          disabled={isSubmitting}
+        />
+
         {/* Reporter Name & Priority Checkbox */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
           <div className="flex items-center gap-2">
@@ -457,7 +489,7 @@ export default function TicketSubmissionForm({ initialLab, initialPc, onTicketCr
           {isSubmitting ? (
             <>
               <Loader2 size={16} className="animate-spin text-white" />
-              <span>Transmitting IoT Dispatch Packet...</span>
+              <span>{photos.length > 0 ? 'Submitting ticket & photos…' : 'Submitting ticket…'}</span>
             </>
           ) : isSelectedStationUnderRepair ? (
             <>

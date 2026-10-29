@@ -14,7 +14,7 @@ export default function HeroSection() {
   return (
     <section
       id="hero"
-      className="relative min-h-screen flex flex-col items-center justify-center pt-16 pb-8 px-4 overflow-hidden hero-grid"
+      className="relative min-h-screen flex flex-col items-center justify-center pt-16 pb-8 px-4 overflow-hidden"
       aria-label="Hero section"
     >
       {/* Radial glow blob */}
@@ -48,7 +48,7 @@ export default function HeroSection() {
 
         {/* Updated tagline */}
         <p className="text-lg sm:text-xl text-slate-400 max-w-3xl mx-auto leading-relaxed mb-10 animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
-          Eliminating campus computer lab downtime by integrating IoT hardware remotes with a real-time, role-based IT dispatch platform.
+          Reducing computer lab downtime on campus through a real-time IT dispatch platform.
         </p>
 
         {/* Single centered Get Started CTA */}
@@ -79,9 +79,12 @@ export default function HeroSection() {
       </div>
 
       {/* Scroll hint */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 animate-bounce opacity-50" aria-hidden="true">
-        <div className="w-px h-8 bg-gradient-to-b from-transparent to-slate-500" />
-        <span className="text-xs text-slate-500">Scroll to explore</span>
+      {/* Centered by a full-width row: the bounce animation sets `transform`, which would cancel a translate-x centering */}
+      <div className="absolute bottom-8 inset-x-0 flex justify-center pointer-events-none" aria-hidden="true">
+        <div className="flex flex-col items-center gap-2 animate-bounce opacity-50">
+          <div className="w-px h-8 bg-gradient-to-b from-transparent to-slate-500" />
+          <span className="text-xs text-slate-500">Scroll to explore</span>
+        </div>
       </div>
     </section>
   );

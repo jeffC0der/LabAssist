@@ -5,6 +5,7 @@ import { useTickets } from '@/context/TicketContext';
 import { useAuth } from '@/context/AuthContext';
 import { getCategoryColors, getStatusColors, formatTimestamp, formatFullTimestamp } from '@/lib/utils';
 import type { Ticket, TicketStatus } from '@/lib/mockData';
+import RepairPhotoGallery from '@/components/repairs/RepairPhotoGallery';
 
 export default function MyTicketsTracker() {
   const { tickets } = useTickets();
@@ -174,7 +175,7 @@ export default function MyTicketsTracker() {
                               Queued
                             </span>
                           </div>
-                          <p className="text-[10px] text-slate-500 hidden sm:block">IoT Packet Received</p>
+                          <p className="text-[10px] text-slate-500 hidden sm:block">Report received</p>
                         </div>
                       );
                     })()}
@@ -244,6 +245,10 @@ export default function MyTicketsTracker() {
                         {ticket.description.replace(/<!--LABASSIST_.*?-->/g, '').trim()}
                       </p>
                     </div>
+
+                    {/* Photos the student attached when reporting (loaded when the ticket is opened) */}
+                    <RepairPhotoGallery ticketId={ticket.ticket_id} title="Your photos" />
+
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 text-[11px]">
                       <div>

@@ -5,27 +5,33 @@ import ModalPortal from '@/components/shared/ModalPortal';
 import type { PhotoKind } from '@/lib/repairPhotos';
 import type { RepairPhoto } from '@/app/api/repairs/photos/route';
 
-interface RepairPhotoGalleryProps {
-  rma: string;
-  kind: PhotoKind;
-  title: string;
-}
+type RepairPhotoGalleryProps =
+  | { rma: string; kind: PhotoKind; ticketId?: never; title: string }
+  | { ticketId: string; rma?: never; kind?: never; title: string };
 
-/** Photos the client attached to a repair (one section); click a thumbnail to view it full size. */
-export default function RepairPhotoGallery({ rma, kind, title }: RepairPhotoGalleryProps) {
-  const [photos, setPhotos] = useState<RepairPhoto[] | null>(null);
+type GalleryPhoto = Pick<RepairPhoto, 'id' | 'url'>;
+
+/**
+ * Photos the client attached: one section of a repair (rma + kind), or a lab PC ticket (ticketId).
+ * Click a thumbnail to view it full size.
+ */
+export default function RepairPhotoGallery({ rma, kind, ticketId, title }: RepairPhotoGalleryProps) {
+  const [photos, setPhotos] = useState<GalleryPhoto[] | null>(null);
   const [open, setOpen] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
-    fetch(`/api/repairs/photos?rma=${encodeURIComponent(rma)}`, { cache: 'no-store' })
+    const url = ticketId
+      ? `/api/tickets/photos?ticket=${encodeURIComponent(ticketId)}`
+      : `/api/repairs/photos?rma=${encodeURIComponent(rma || '')}`;
+    fetch(url, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : { photos: [] }))
-      .then((d) => alive && setPhotos((d.photos || []).filter((p: RepairPhoto) => p.kind === kind)))
+      .then((d) => alive && setPhotos((d.photos || []).filter((p: RepairPhoto) => !kind || p.kind === kind)))
       .catch(() => alive && setPhotos([]));
     return () => {
       alive = false;
     };
-  }, [rma, kind]);
+  }, [rma, kind, ticketId]);
 
   useEffect(() => {
     if (open === null) return;

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireAuth } from '@/lib/serverAuth';
 import { errorResponse, readJson, reqStr, reqNum, optStr, optEmail, optOneOf, optDate, PATTERNS } from '@/lib/validation';
+import { splitServiceFee, serviceFeePaid } from '@/lib/serviceFee';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -63,6 +64,9 @@ export async function GET(request: Request) {
 
   // Outstanding balances from saved repair invoices (cancelled Job Orders excluded)
   const outstandingBalances: number[] = [];
+  // Service fee received so far, from the fee line saved on each invoice (the fee counts as paid first)
+  let serviceFeeIncome = 0;
+  let invoicesWithFee = 0;
   // Registered technician names for the Record Payment form
   const technicianOptions: string[] = [];
 
@@ -100,7 +104,7 @@ export async function GET(request: Request) {
     try {
       const { data: invRows, error: invErr } = await supabase
         .from('repair_invoices')
-        .select('rma_number, total_amount, amount_paid');
+        .select('rma_number, total_amount, amount_paid, items');
 
       if (invErr) {
         console.warn('Supabase repair_invoices fetch error:', invErr.message);
@@ -115,6 +119,11 @@ export async function GET(request: Request) {
           if (cancelled.has(r.rma_number)) return;
           const balance = Number(r.total_amount || 0) - Number(r.amount_paid || 0);
           if (balance > 0.005) outstandingBalances.push(balance);
+          const { fee } = splitServiceFee(r.items);
+          if (fee > 0) {
+            invoicesWithFee++;
+            serviceFeeIncome += serviceFeePaid(fee, Number(r.amount_paid || 0));
+          }
         });
       }
     } catch (err) {
@@ -278,6 +287,13 @@ export async function GET(request: Request) {
       onlineTotal,
       cashPercentage: grossRevenue > 0 ? Math.round((cashTotal / grossRevenue) * 100) : 0,
       onlinePercentage: grossRevenue > 0 ? Math.round((onlineTotal / grossRevenue) * 100) : 0,
+    },
+    // Total collected = service fee income + parts & materials (everything else clients paid)
+    breakdown: {
+      totalCollected: grossRevenue,
+      serviceFeeIncome: Math.min(serviceFeeIncome, Math.max(0, grossRevenue)),
+      partsAndMaterials: Math.max(0, grossRevenue - Math.min(serviceFeeIncome, Math.max(0, grossRevenue))),
+      invoicesWithFee,
     },
     technicianPerformance,
     charts: {

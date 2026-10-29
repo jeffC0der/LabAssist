@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Wrench,
   Laptop,
@@ -55,6 +55,7 @@ import JobMaterials from '@/components/repairs/JobMaterials';
 import RepairPhotoGallery from '@/components/repairs/RepairPhotoGallery';
 import { WORK_SCOPE_MAX, defaultWorkScope } from '@/lib/repairLimits';
 import { buildReleaseReceipt, fetchRepairInvoice, type ReleaseReceiptData } from '@/lib/releaseReceipt';
+import { splitServiceFee, isServiceFee, SERVICE_FEE_LABEL } from '@/lib/serviceFee';
 
 const LAB_ROOM_OPTIONS = [
   { code: 'LAB-101', name: 'Embedded Systems & IoT Lab (1st Floor)' },
@@ -149,6 +150,9 @@ export default function TechnicianRepairsWorkbench() {
   const [billingAmountPaid, setBillingAmountPaid] = useState<string>('');
   const [billingOnlineReference, setBillingOnlineReference] = useState<string>('');
   const [billingNotes, setBillingNotes] = useState<string>('');
+  // Service fee on this invoice: the amount it was created with, or the admin's current fee for a new invoice
+  const [billingServiceFee, setBillingServiceFee] = useState<number>(0);
+  const billingFeeRequest = useRef(0);
   const [isSubmittingBilling, setIsSubmittingBilling] = useState<boolean>(false);
 
   // ── View Invoice Modal State ──
@@ -671,20 +675,26 @@ export default function TechnicianRepairsWorkbench() {
   const handleOpenBillingModal = async (job: DeviceRepair) => {
     setBillingTarget(job);
     setIsSubmittingBilling(false);
+    billingFeeRequest.current++;
 
     try {
       const res = await fetch(`/api/repairs/invoices?jobOrderNumber=${job.id}`);
       if (res.ok) {
         const data = await res.json();
         if (data.invoice && data.items && data.items.length > 0) {
+          // The fee stays as saved on this invoice (shown locked); only the other lines are editable
+          const { fee, others } = splitServiceFee(data.items as any[]);
+          setBillingServiceFee(fee);
           setBillingItems(
-            data.items.map((it: any, idx: number) => ({
-              id: it.id || `item-${idx}`,
-              workScope: it.workScope || '',
-              itemName: it.itemName || '',
-              quantity: it.quantity || 1,
-              unitCost: it.unitCost || '',
-            }))
+            others.length > 0
+              ? others.map((it: any, idx: number) => ({
+                  id: it.id || `item-${idx}`,
+                  workScope: it.workScope || '',
+                  itemName: it.itemName || '',
+                  quantity: it.quantity || 1,
+                  unitCost: it.unitCost || '',
+                }))
+              : [{ id: 'item-1', workScope: '', itemName: '', quantity: 1, unitCost: '' }]
           );
           setBillingPaymentTiming(data.invoice.paymentTiming || 'PAY_AFTER_REPAIR');
           setBillingPaymentMethod(data.invoice.paymentMethod || 'CASH');
@@ -697,6 +707,14 @@ export default function TechnicianRepairsWorkbench() {
     } catch (err) {
       console.warn('Could not fetch existing invoice:', err);
     }
+
+    // New invoice: it will get the admin's current service fee (ignored if another job was opened meanwhile)
+    setBillingServiceFee(0);
+    const request = ++billingFeeRequest.current;
+    fetch('/api/billing/settings', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => request === billingFeeRequest.current && setBillingServiceFee(Number(s?.serviceFee || 0)))
+      .catch(() => {});
 
     // Default initialization
     setBillingItems([
@@ -735,11 +753,12 @@ export default function TechnicianRepairsWorkbench() {
     );
   };
 
-  const calculatedBillingTotal = billingItems.reduce((acc, curr) => {
+  const billingPartsTotal = billingItems.reduce((acc, curr) => {
     const qty = Math.max(1, Number(curr.quantity) || 1);
     const cost = Math.max(0, Number(curr.unitCost) || 0);
     return acc + qty * cost;
   }, 0);
+  const calculatedBillingTotal = billingPartsTotal + billingServiceFee;
 
   const handleGenerateInvoice = async () => {
     if (!billingTarget) return;
@@ -834,7 +853,8 @@ export default function TechnicianRepairsWorkbench() {
         paymentTiming: billingPaymentTiming,
         paymentStatus: resData.invoice?.paymentStatus || 'UNPAID',
         paymentMethod: billingPaymentTiming === 'PAY_NOW' ? billingPaymentMethod : (billingPaymentMethod || undefined),
-        totalAmount: calculatedBillingTotal,
+        // The server's total (it adds the service fee) is the source of truth
+        totalAmount: Number(resData.invoice?.totalAmount ?? calculatedBillingTotal),
         amountPaid: Number(resData.invoice?.amountPaid || 0),
         onlinePaymentReference: billingPaymentTiming === 'PAY_NOW' && billingPaymentMethod === 'ONLINE' ? billingOnlineReference.trim() : undefined,
         settlementDate: resData.invoice?.settlementDate || undefined,
@@ -849,7 +869,7 @@ export default function TechnicianRepairsWorkbench() {
 
       toast.success(
         'Invoice Generated & Linked',
-        `Invoice ${resData.invoice?.invoiceNumber || ''} created (₱${calculatedBillingTotal.toLocaleString()})${emailNote}.`
+        `Invoice ${resData.invoice?.invoiceNumber || ''} created (₱${Number(resData.invoice?.totalAmount ?? calculatedBillingTotal).toLocaleString()})${emailNote}.`
       );
 
       if (resData.invoice) {
@@ -2582,11 +2602,30 @@ export default function TechnicianRepairsWorkbench() {
                   })}
                 </div>
 
+                {/* Service fee: set by the admin, added automatically, can't be edited here */}
+                {billingServiceFee > 0 && (
+                  <div className="p-3.5 rounded-xl bg-indigo-950/30 border border-indigo-500/30 flex items-center justify-between gap-3" data-testid="billing-service-fee">
+                    <div className="min-w-0">
+                      <span className="font-mono font-bold text-indigo-300 text-[11px] flex items-center gap-1.5">
+                        <Lock size={12} /> {SERVICE_FEE_LABEL}
+                      </span>
+                      <span className="text-[11px] text-slate-400 block mt-0.5">Added automatically to every invoice · set by the admin</span>
+                    </div>
+                    <span className="font-mono font-bold text-indigo-200 whitespace-nowrap">
+                      ₱{billingServiceFee.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
+
                 {/* Auto-calculated Total Amount Banner */}
-                <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-950/40 via-slate-950 to-slate-900 border border-emerald-500/40 flex items-center justify-between">
+                <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-950/40 via-slate-950 to-slate-900 border border-emerald-500/40 flex items-center justify-between gap-3">
                   <div>
                     <span className="text-slate-400 text-xs block font-sans">Automatically Calculated Total Amount:</span>
-                    <span className="text-[11px] text-slate-500 font-mono">{billingItems.length} billing line item(s)</span>
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      {billingServiceFee > 0
+                        ? `Parts & materials ₱${billingPartsTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })} + service fee ₱${billingServiceFee.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                        : `${billingItems.length} billing line item(s)`}
+                    </span>
                   </div>
                   <div className="text-right">
                     <span className="text-2xl font-extrabold text-emerald-400 font-mono tracking-tight">
@@ -2872,10 +2911,12 @@ export default function TechnicianRepairsWorkbench() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 font-mono">
-                    {(invoiceViewData.items || []).map((item: any, idx: number) => (
-                      <tr key={idx} className="hover:bg-slate-900/40">
-                        <td className="p-2.5 font-sans font-semibold text-slate-100">{item.workScope}</td>
-                        <td className="p-2.5 text-slate-400">{item.itemName || '—'}</td>
+                    {[...(invoiceViewData.items || [])]
+                      .sort((a: any, b: any) => Number(isServiceFee(a)) - Number(isServiceFee(b)))
+                      .map((item: any, idx: number) => (
+                      <tr key={idx} className={isServiceFee(item) ? 'bg-indigo-950/30' : 'hover:bg-slate-900/40'}>
+                        <td className="p-2.5 font-sans font-semibold text-slate-100">{isServiceFee(item) ? SERVICE_FEE_LABEL : item.workScope}</td>
+                        <td className="p-2.5 text-slate-400">{isServiceFee(item) ? 'Standard repair service fee' : item.itemName || '—'}</td>
                         <td className="p-2.5 text-center text-slate-300">{item.quantity || 1}</td>
                         <td className="p-2.5 text-right text-slate-300">₱{Number(item.unitCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                         <td className="p-2.5 text-right font-bold text-emerald-400">₱{Number(item.totalCost || item.unitCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
@@ -2899,6 +2940,18 @@ export default function TechnicianRepairsWorkbench() {
               </div>
 
               <div className="text-right space-y-0.5">
+                {(() => {
+                  const { fee, othersTotal } = splitServiceFee(invoiceViewData.items || []);
+                  if (fee <= 0) return null;
+                  const money = (n: number) => `₱${n.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+                  return (
+                    <div className="text-[11px] text-slate-400 font-sans pb-1">
+                      Parts &amp; materials <span className="font-mono text-slate-200">{money(othersTotal)}</span>
+                      {' · '}
+                      {SERVICE_FEE_LABEL} <span className="font-mono text-indigo-300">{money(fee)}</span>
+                    </div>
+                  );
+                })()}
                 <span className="text-slate-400 font-sans block text-xs">Total Amount Due:</span>
                 <strong className="text-2xl font-extrabold text-emerald-400 tracking-tight block">
                   ₱{Number(invoiceViewData.totalAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}

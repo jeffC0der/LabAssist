@@ -395,6 +395,52 @@ select:not([multiple]):not([size]):not(.appearance-none) {
   }
 }
 
+/* ── Claymorphism (landing page): soft, puffy surfaces with an inner highlight and a deep drop shadow ── */
+.clay-card {
+  background: linear-gradient(145deg, #1e293b, #0f172a);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  box-shadow:
+    12px 14px 28px rgba(0, 0, 0, 0.45),
+    -6px -6px 18px rgba(99, 102, 241, 0.06),
+    inset 2px 2px 3px rgba(255, 255, 255, 0.07),
+    inset -4px -4px 8px rgba(0, 0, 0, 0.35);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+.clay-card:hover { transform: translateY(-3px); }
+.clay-chip {
+  background: linear-gradient(145deg, rgba(16, 185, 129, 0.22), rgba(99, 102, 241, 0.18));
+  box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.35), inset 1px 1px 2px rgba(255, 255, 255, 0.18), inset -2px -2px 4px rgba(0, 0, 0, 0.25);
+}
+.clay-inset {
+  background: rgba(15, 23, 42, 0.7);
+  box-shadow: inset 3px 3px 7px rgba(0, 0, 0, 0.45), inset -2px -2px 5px rgba(255, 255, 255, 0.04);
+}
+.clay-fab {
+  background: linear-gradient(145deg, #6366f1, #06b6d4);
+  box-shadow: 8px 10px 22px rgba(0, 0, 0, 0.45), inset 2px 2px 4px rgba(255, 255, 255, 0.35), inset -4px -4px 8px rgba(30, 27, 75, 0.45);
+}
+html.light .clay-card {
+  background: linear-gradient(145deg, #ffffff, #eef1fb);
+  border-color: rgba(129, 140, 248, 0.25);
+  box-shadow:
+    12px 14px 30px rgba(79, 70, 229, 0.16),
+    -8px -8px 20px rgba(255, 255, 255, 0.9),
+    inset 2px 2px 3px #ffffff,
+    inset -4px -4px 8px rgba(99, 102, 241, 0.08);
+}
+html.light .clay-chip {
+  background: linear-gradient(145deg, #d1fae5, #e0e7ff);
+  box-shadow: 4px 4px 10px rgba(79, 70, 229, 0.15), inset 1px 1px 2px #ffffff, inset -2px -2px 4px rgba(79, 70, 229, 0.1);
+}
+html.light .clay-inset {
+  background: #eef1fb;
+  box-shadow: inset 3px 3px 7px rgba(79, 70, 229, 0.12), inset -3px -3px 6px #ffffff;
+}
+html.light .clay-fab { box-shadow: 8px 10px 22px rgba(79, 70, 229, 0.3), inset 2px 2px 4px rgba(255, 255, 255, 0.45), inset -4px -4px 8px rgba(30, 27, 75, 0.25); }
+@media (prefers-reduced-motion: reduce) {
+  .clay-card, .clay-card:hover { transition: none; transform: none; }
+}
+
 /* ═══════════════════ Light mode ═══════════════════
    Colors flip through theme-colors.css; these cover the hand-written dark surfaces above and the few
    places where "white" means "brightest text" rather than "text on a colored button". */

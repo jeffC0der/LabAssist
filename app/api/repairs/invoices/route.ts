@@ -4,6 +4,8 @@ import { sendInvoiceNotificationEmail } from '@/lib/emailService';
 import { requireAuth, STAFF_ROLES } from '@/lib/serverAuth';
 import { notifyUser, formatPeso } from '@/lib/notifications';
 import { WORK_SCOPE_MAX } from '@/lib/repairLimits';
+import { isServiceFee, serviceFeeLine, splitServiceFee } from '@/lib/serviceFee';
+import { currentServiceFee } from '@/lib/billingSettings';
 import { errorResponse, readJson, optStr, optOneOf, optNum, optEmail, ValidationError, PATTERNS } from '@/lib/validation';
 import {
   setInMemoryInvoice,
@@ -319,41 +321,59 @@ export async function POST(request: Request) {
 
     const joNum = jobOrderNumber || 'JO-' + Date.now();
 
-    // Compute item totals
-    const calculatedItems = items.map((it: any, index: number) => {
-      const qty = Math.max(1, Number(it.quantity) || 1);
-      const unitCost = Math.max(0, Number(it.unitCost) || 0);
-      const scope = it.workScope?.trim() || 'Diagnostics & Labor Service';
-      return {
-        id: `item-${Date.now()}-${index}`,
-        workScope: scope,
-        itemName: it.itemName?.trim() || undefined,
-        quantity: qty,
-        unitCost: unitCost,
-        totalCost: qty * unitCost,
-      };
-    });
-
-    const totalAmount = calculatedItems.reduce((acc: number, curr: any) => acc + curr.totalCost, 0);
-
     const supabase = getSupabaseAdmin();
 
-    // Amount already received for this Job Order, kept when billing is edited without a new payment
+    // Amount already received for this Job Order, kept when billing is edited without a new payment,
+    // and the lines it was saved with (for its service fee)
     let previousAmountPaid = 0;
     let previousReference: string | null = null;
     let previousMethod: string | null = null;
+    let previousInvoiceExists = false;
+    let previousItems: any[] = [];
     if (supabase) {
       const { data: prevInv } = await supabase
         .from('repair_invoices')
-        .select('amount_paid, online_payment_reference, payment_method')
+        .select('amount_paid, online_payment_reference, payment_method, items')
         .eq('rma_number', joNum)
         .maybeSingle();
       if (prevInv) {
+        previousInvoiceExists = true;
+        previousItems = Array.isArray(prevInv.items) ? prevInv.items : [];
         previousAmountPaid = Number(prevInv.amount_paid || 0);
         previousReference = prevInv.online_payment_reference || null;
         previousMethod = prevInv.payment_method || null;
       }
     }
+
+    // Service fee: added once, when the invoice is first created, at the fee the admin set at that time.
+    // Editing an invoice keeps the fee it was created with (none for invoices made before the fee existed),
+    // so a later fee change never alters it and a job is never charged twice.
+    const feeAmount = previousInvoiceExists
+      ? splitServiceFee(previousItems).fee
+      : supabase
+      ? await currentServiceFee(supabase)
+      : 0;
+    const feeLine = serviceFeeLine(feeAmount);
+
+    // Compute item totals. A fee line sent back by the browser is ignored: only the server sets the fee.
+    const calculatedItems: any[] = items
+      .filter((it: any) => !isServiceFee(it))
+      .map((it: any, index: number) => {
+        const qty = Math.max(1, Number(it.quantity) || 1);
+        const unitCost = Math.max(0, Number(it.unitCost) || 0);
+        const scope = it.workScope?.trim() || 'Diagnostics & Labor Service';
+        return {
+          id: `item-${Date.now()}-${index}`,
+          workScope: scope,
+          itemName: it.itemName?.trim() || undefined,
+          quantity: qty,
+          unitCost: unitCost,
+          totalCost: qty * unitCost,
+        };
+      });
+    if (feeLine) calculatedItems.push(feeLine);
+
+    const totalAmount = calculatedItems.reduce((acc: number, curr: any) => acc + curr.totalCost, 0);
 
     // Strict validation according to specifications
     let resolvedPaymentStatus = paymentStatus;

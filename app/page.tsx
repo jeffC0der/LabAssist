@@ -1,9 +1,11 @@
 import type { Metadata } from 'next';
-import Image from 'next/image';
-import Link from 'next/link';
 import LandingHeader from '@/components/landing/LandingHeader';
 import HeroSection from '@/components/landing/HeroSection';
-import LiveDemoPreview from '@/components/landing/LiveDemoPreview';
+import CampusStats from '@/components/landing/CampusStats';
+import RepairSteps from '@/components/landing/RepairSteps';
+import HelpWidget from '@/components/landing/HelpWidget';
+import LandingFooter from '@/components/landing/LandingFooter';
+// The ESP32 keypad demo (components/landing/LiveDemoPreview.tsx) is hidden for now; add <LiveDemoPreview /> back to show it
 
 export const metadata: Metadata = {
   title: 'LabAssist — Campus Lab Maintenance at the Touch of a Button',
@@ -12,41 +14,18 @@ export const metadata: Metadata = {
 
 export default function LandingPage() {
   return (
-    <main className="min-h-screen bg-base" id="main-content">
+    // The grid background runs down the whole page, behind every section
+    <main className="min-h-screen bg-base hero-grid" id="main-content">
       <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:bg-indigo-500 focus:text-slate-50 focus:rounded-lg">
         Skip to main content
       </a>
 
       <LandingHeader />
       <HeroSection />
-      <LiveDemoPreview />
-
-      {/* Footer */}
-      <footer className="border-t border-slate-800 py-8 px-4" role="contentinfo">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-600">
-          <div className="flex items-center gap-2">
-            <Image
-              src="/UMakLabAssistLogo.png"
-              alt="UMak LabAssist Logo"
-              width={20}
-              height={20}
-              className="w-5 h-5 object-contain rounded-full opacity-80"
-            />
-            <div className="flex items-center">
-              <span className="font-bold text-slate-500">Lab</span>
-              <span className="font-bold text-indigo-500">Assist</span>
-            </div>
-            <span>— IoT Lab Maintenance Platform</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span>Campus IT Services · {new Date().getFullYear()}</span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
-              System Online
-            </span>
-          </div>
-        </div>
-      </footer>
+      <CampusStats />
+      <RepairSteps />
+      <LandingFooter />
+      <HelpWidget />
     </main>
   );
 }

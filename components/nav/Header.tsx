@@ -99,20 +99,22 @@ export default function Header() {
       <div className="max-w-[1650px] mx-auto px-3 sm:px-6 h-full flex items-center justify-between gap-2 sm:gap-4">
         {/* Left: Brand Logo & WS Status */}
         <div className="flex items-center gap-3 sm:gap-4 flex-shrink-0">
-          <Link href="/" className="flex items-center gap-2.5 group" aria-label="LabAssist Home">
+          {/* Brand only, not a link: signed-in users stay in their portal (the landing page is for visitors) */}
+          <div className="flex items-center gap-2.5 select-none">
             <Image
               src="/UMakLabAssistLogo.png"
               alt="UMak LabAssist Logo"
               width={32}
               height={32}
-              className="w-8 h-8 object-contain rounded-full drop-shadow-md group-hover:scale-105 transition-transform duration-300"
+              draggable={false}
+              className="w-8 h-8 object-contain rounded-full drop-shadow-md"
             />
             {/* Phones show the logo only, so the bar fits the screen */}
             <div className="hidden sm:flex items-center">
               <span className="text-sm font-bold text-slate-100 tracking-tight">Lab</span>
               <span className="text-sm font-bold gradient-text tracking-tight">Assist</span>
             </div>
-          </Link>
+          </div>
 
           {/* Active Workspace Status Badge */}
           <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border border-slate-700/60 bg-slate-900/60">
